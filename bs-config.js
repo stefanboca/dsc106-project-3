@@ -1,3 +1,6 @@
+// browser-sync config
+// run with `browser-sync start --config bs-config.js`
+
 export const server = {
   baseDir: "./docs",
 };
