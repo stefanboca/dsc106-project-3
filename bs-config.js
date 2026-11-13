@@ -1,5 +1,5 @@
 export const server = {
-  baseDir: ".",
+  baseDir: "./docs",
 };
 export const watch = true;
 export const injectChanges = false;
