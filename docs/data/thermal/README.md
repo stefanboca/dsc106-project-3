@@ -37,3 +37,15 @@ https://firms.modaps.eosdis.nasa.gov/country/
 https://gibs.earthdata.nasa.gov/vector-metadata/v1.0/FIRMS_MODIS_Thermal_Anomalies.json
 https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json
 https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json
+
+The downloader also saves ../aod-grid.json, a static list of California pixel
+centers for the 240×223 AOD display grid. The browser reuses that mask rather
+than repeating polygon containment after each daily PNG download. Refresh only
+this mask and the boundaries with:
+uv run scripts/download_data.py --boundaries-only
+
+The browser keeps up to 16 complete decoded days in memory, separately from
+static metadata. Nearby days are prefetched serially after the selected date
+is displayed; selecting another date interrupts background work and retargets
+the warm window. Failed/partial days remain retryable. This cache lasts until
+page reload. Live AOD downloads still depend on NASA service response times.

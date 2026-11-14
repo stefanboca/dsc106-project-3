@@ -1,11 +1,11 @@
 import * as d3 from 'https://cdn.jsdelivr.net/npm/d3@7/+esm';
-import { loadMODIS, loadCalifornia, loadCounties, CALIFORNIA_BOUNDS } from './global.js';
+import { loadMODIS, loadCalifornia, loadCounties, getCachedDay, prefetchDays, stopPrefetch, CALIFORNIA_BOUNDS } from './global.js';
 
 const svg = d3.select('#map');
 const scene = svg.append('g');
 const projection = d3.geoEquirectangular();
 const path = d3.geoPath(projection);
-const color = d3.scaleThreshold().domain([0.2, 0.5, 1, 2]).range(d3.schemeYlGnBu[5]);
+const color = d3.scaleThreshold().domain([0.2, 0.5, 1, 2]).range(d3.quantize(d3.interpolateViridis, 5));
 const DETECTION_COLOR = '#f97316';
 const radius = 4.5;
 const OPACITY_MAX_FRP = 100;
@@ -33,7 +33,7 @@ const interaction = document.querySelector('#interaction');
 let selecting = false;
 let region = null; // [[west, south], [east, north]], retained across dates and zoom.
 let syncingBrush = false;
-const date = document.querySelector('#date');
+let selectedIndex = 252;
 const calendar = document.querySelector('#calendar-date');
 const infoButton = document.querySelector('#confidence-info');
 const infoPopover = document.querySelector('#confidence-help');
@@ -51,8 +51,7 @@ calendar.addEventListener('change', () => {
     return;
   }
   if (!calendar.validity.valid) return;
-  date.value = d3.utcDay.count(firstDay, new Date(calendar.value + 'T00:00:00Z'));
-  date.dispatchEvent(new Event('input'));
+  selectDay(d3.utcDay.count(firstDay, new Date(calendar.value + 'T00:00:00Z')));
 });
 const status = document.querySelector('#status');
 const retry = document.querySelector('#retry');
@@ -61,73 +60,180 @@ let selection = 0;
 let debounce;
 const firstDay = new Date('2020-01-01T00:00:00Z');
 const lastDay = d3.utcDay.floor(new Date());
+const DAY = 86400000;
 const daySpan = d3.utcDay.count(firstDay, lastDay);
-date.max = daySpan;
 calendar.max = d3.utcFormat('%Y-%m-%d')(lastDay);
+const selectedDate = () => d3.utcFormat('%Y-%m-%d')(d3.utcDay.offset(firstDay, selectedIndex));
 const viewport = document.querySelector('#timeline-viewport');
-const track = document.querySelector('#timeline-track');
-function revealDate() {
-  const x = 8 + Number(date.value) * 3;
-  if (x < viewport.scrollLeft + 25 || x > viewport.scrollLeft + viewport.clientWidth - 25) {
-    viewport.scrollLeft = Math.max(0, x - viewport.clientWidth / 2);
-  }
-}
-document.querySelector('#today').addEventListener('click', () => {
-  date.value = daySpan;
-  date.dispatchEvent(new Event('input'));
-});
-const selectedDate = () => d3.utcFormat('%Y-%m-%d')(d3.utcDay.offset(firstDay, Number(date.value)));
-
 const histogram = d3.select('#detection-histogram');
 let countDays = null;
 let countsRequested = false;
 let timelineWidth = 0;
-// Shared by bars, selected-day cursor, slider and calendar ticks. The 8px
-// inset matches half of the slider thumb's 16px width.
-const timeScale = d3.scaleUtc().domain([firstDay, lastDay]);
-function dailyCount(day) {
-  if (!day?.groups) return null;
-  return d3.sum(day.groups, ([type, score, count]) => enabledTypes.has(type) && (Number(confidence.value) === 0 || score >= Number(confidence.value)) ? count : 0);
+let pixelsPerDay = 3;
+let viewStart = 0;
+const timelineMargin = { left: 48, right: 12 };
+const plotWidth = () => Math.max(1, timelineWidth - timelineMargin.left - timelineMargin.right);
+const visibleSpan = () => plotWidth() / pixelsPerDay;
+const timeScale = d3.scaleUtc();
+function clampView() {
+  pixelsPerDay = Math.max(plotWidth() / (daySpan + 1), Math.min(80, pixelsPerDay));
+  viewStart = Math.max(-0.5, Math.min(daySpan + 0.5 - visibleSpan(), viewStart));
+  timeScale.domain([new Date(+firstDay + viewStart * DAY), new Date(+firstDay + (viewStart + visibleSpan()) * DAY)])
+    .range([timelineMargin.left, timelineWidth - timelineMargin.right]);
 }
-function drawHistogram() {
-  if (!timelineWidth || !countDays) return;
-  histogram.attr('viewBox', `0 0 ${timelineWidth} 125`);
-  const maxCount = d3.max(countDays, day => d3.sum(day.groups ?? [], group => group[2])) || 1;
-  const y = d3.scaleLinear().domain([0, maxCount]).nice().range([115, 12]);
-  const barWidth = Math.max(0.5, (timelineWidth - 16) / daySpan * 0.85);
-  histogram.selectAll('g.count-grid').data([null]).join('g').attr('class', 'count-grid')
-    .selectAll('line').data(y.ticks(3)).join('line')
-    .attr('x1', 8).attr('x2', timelineWidth - 8).attr('y1', y).attr('y2', y).attr('stroke', '#e1e7ed');
-  histogram.selectAll('rect.day-bar').data(countDays.filter(day => day.groups !== null), day => day.date).join('rect').attr('class', 'day-bar')
-    .attr('data-date', day => day.date).attr('data-count', dailyCount)
-    .attr('x', day => timeScale(new Date(`${day.date}T00:00:00Z`)) - barWidth / 2)
-    .attr('y', day => y(dailyCount(day))).attr('width', barWidth)
-    .attr('height', day => y(0) - y(dailyCount(day)))
-    .attr('fill', day => day.date === selectedDate() ? DETECTION_COLOR : '#6e879e')
-    .selectAll('title').data(day => [day]).join('title')
-    .text(day => `${day.date}: ${dailyCount(day).toLocaleString()} California detections passing type and confidence filters`);
-  const years = d3.utcYear.range(firstDay, d3.utcDay.offset(lastDay, 1));
-  const ticks = years.flatMap(year => y.ticks(3).map(value => ({ year, value })));
-  histogram.selectAll('text.count-tick').data(ticks).join('text').attr('class', 'count-tick')
-    .attr('x', d => timeScale(d.year) + 2).attr('y', d => y(d.value) - 3).attr('pointer-events', 'none')
-    .text(d => d3.format(',d')(d.value));
-  histogram.selectAll('rect.missing-day').data(countDays.filter(day => day.groups === null), day => day.date).join('rect')
-    .attr('class', 'missing-day').attr('x', day => timeScale(new Date(day.date + 'T00:00:00Z')) - barWidth / 2)
-    .attr('y', 112).attr('width', barWidth).attr('height', 5).attr('fill', '#cbd0d5')
-    .selectAll('title').data(day => [day]).join('title').text(day => day.date + ': counts unavailable');
-  const selectedX = timeScale(d3.utcDay.offset(firstDay, Number(date.value)));
-  histogram.selectAll('line.selected-day').data([selectedX]).join('line').attr('class', 'selected-day')
-    .attr('x1', d => d).attr('x2', d => d).attr('y1', 5).attr('y2', 120)
-    .attr('stroke', DETECTION_COLOR).attr('stroke-width', 1.5).attr('pointer-events', 'none');
-  const selected = countDays[Number(date.value)];
-  document.querySelector('#histogram-status').textContent = `Daily California detections · ${selectedDate()}: ${dailyCount(selected)?.toLocaleString() ?? 'counts unavailable'} · type and confidence filters applied; statewide, independent of map selection`;
+function revealDate() {
+  if (selectedIndex < viewStart || selectedIndex > viewStart + visibleSpan()) {
+    viewStart = selectedIndex - visibleSpan() / 2;
+    clampView();
+  }
 }
-histogram.on('click', event => {
+document.querySelector('#today').addEventListener('click', () => selectDay(daySpan));
+let countSignature = '';
+let countVersion = 0;
+let filteredCounts = null;
+function updateCounts() {
   if (!countDays) return;
+  const signature = [...enabledTypes].sort().join(',') + '/' + confidence.value;
+  if (signature === countSignature && filteredCounts) return;
+  countSignature = signature; countVersion++;
+  const minimum = Number(confidence.value);
+  filteredCounts = Float64Array.from(countDays, day => day.groups === null ? NaN :
+    d3.sum(day.groups, ([type, score, count]) => enabledTypes.has(type) && (minimum === 0 || score >= minimum) ? count : 0));
+}
+function dailyCount(day) {
+  if (!day || day.groups === null) return null;
+  updateCounts();
+  return filteredCounts[day.index];
+}
+const timelineDefs = histogram.append('defs');
+const timelineClip = timelineDefs.append('clipPath').attr('id', 'timeline-plot-clip').append('rect');
+const countGrid = histogram.append('g').attr('class', 'count-grid');
+const bars = histogram.append('g').attr('class', 'timeline-bars').attr('clip-path', 'url(#timeline-plot-clip)');
+const countAxis = histogram.append('g').attr('class', 'count-axis');
+const calendarAxis = histogram.append('g').attr('class', 'calendar-axis');
+const yearsAxis = histogram.append('g').attr('class', 'years-axis');
+const playhead = histogram.append('g').attr('class', 'playhead').attr('pointer-events', 'none');
+playhead.append('line').attr('y1', 5).attr('y2', 170).attr('stroke', DETECTION_COLOR).attr('stroke-width', 1.5);
+playhead.append('path').attr('d', d3.symbol().type(d3.symbolTriangle).size(40)()).attr('transform', 'translate(0,6) rotate(180)').attr('fill', DETECTION_COLOR);
+let timelineFrame = null;
+let lastTimelineView = '';
+function drawHistogram() {
+  if (!timelineWidth) return;
+  clampView();
+  if (timelineFrame !== null) return;
+  timelineFrame = requestAnimationFrame(() => { timelineFrame = null; renderHistogram(); });
+}
+function renderHistogram() {
+  updateCounts();
+  const signature = [timelineWidth, viewStart, pixelsPerDay, countVersion].join('/');
+  if (signature !== lastTimelineView) {
+    lastTimelineView = signature;
+    histogram.attr('viewBox', `0 0 ${timelineWidth} 180`);
+    timelineClip.attr('x', timelineMargin.left).attr('y', 0).attr('width', plotWidth()).attr('height', 118);
+    const first = Math.max(0, Math.ceil(viewStart - 0.5));
+    const last = Math.min(daySpan, Math.floor(viewStart + visibleSpan() + 0.5));
+    const visibleDays = countDays?.slice(first, last + 1) ?? [];
+    const maxCount = d3.max(visibleDays, day => filteredCounts[day.index]) || 1;
+    histogram.attr('data-visible-max', maxCount);
+    const y = d3.scaleLinear().domain([0, maxCount]).nice().range([115, 14]);
+    const ticks = y.ticks(3);
+    countGrid.selectAll('line').data(ticks).join('line')
+      .attr('x1', timelineMargin.left).attr('x2', timelineWidth - timelineMargin.right).attr('y1', y).attr('y2', y).attr('stroke', '#e1e7ed');
+    countAxis.selectAll('text.count-tick').data(ticks).join('text').attr('class', 'count-tick')
+      .attr('x', timelineMargin.left - 7).attr('y', d => y(d) + 4).attr('text-anchor', 'end').text(d3.format(',d'));
+    // Below one pixel/day, preserve the highest daily count per pixel column.
+    // Do not sum several days and label that aggregate as a daily count.
+    const step = Math.max(1, Math.ceil(1 / pixelsPerDay));
+    const columns = [];
+    for (let start = first; countDays && start <= last; start += step) {
+      const end = Math.min(last, start + step - 1);
+      let peak = null, missing = false;
+      for (let index = start; index <= end; index++) {
+        const value = filteredCounts[index];
+        if (Number.isNaN(value)) missing = true; else peak = Math.max(peak ?? 0, value);
+      }
+      columns.push({ start, end, peak, missing });
+    }
+    const columnX = column => timelineMargin.left + (column.start - 0.425 - viewStart) * pixelsPerDay;
+    const columnWidth = column => Math.max(0.6, (column.end - column.start + 0.85) * pixelsPerDay);
+    bars.selectAll('rect.day-bar').data(columns.filter(column => column.peak !== null), column => column.start).join('rect').attr('class', 'day-bar')
+      .attr('data-start', column => column.start).attr('data-end', column => column.end).attr('data-count', column => column.peak)
+      .attr('x', columnX).attr('y', column => y(column.peak)).attr('width', columnWidth).attr('height', column => y(0) - y(column.peak))
+      .selectAll('title').data(column => [column]).join('title')
+      .text(column => column.start === column.end ? `${countDays[column.start].date}: ${column.peak.toLocaleString()} detections` :
+        `${countDays[column.start].date}–${countDays[column.end].date}: peak ${column.peak.toLocaleString()} detections/day`);
+    bars.selectAll('rect.missing-day').data(columns.filter(column => column.missing), column => column.start).join('rect').attr('class', 'missing-day')
+      .attr('x', columnX).attr('y', 112).attr('width', columnWidth).attr('height', 5).attr('fill', '#cbd0d5');
+    const span = visibleSpan();
+    const interval = span > 730 ? d3.utcMonth.every(3) : span > 120 ? d3.utcMonth : span > 35 ? d3.utcMonday : d3.utcDay.every(Math.max(1, Math.ceil(55 / pixelsPerDay)));
+    calendarAxis.attr('transform', 'translate(0,123)').call(d3.axisBottom(timeScale).ticks(interval).tickFormat(d3.utcFormat(span > 120 ? '%b' : '%b %d')).tickSize(5))
+      .call(g => g.select('.domain').attr('stroke', '#cbd5e1'));
+    const [start, end] = timeScale.domain();
+    yearsAxis.selectAll('text').data(d3.utcYear.range(d3.utcYear.floor(start), d3.utcDay.offset(end, 1))).join('text')
+      .attr('x', day => Math.max(timelineMargin.left, timeScale(day))).attr('y', 169).text(d3.utcFormat('%Y'));
+    if (countDays) document.querySelector('#histogram-status').textContent = 'Daily California detections · statewide, filters applied' + (step > 1 ? ' · peak daily count per column' : '');
+  }
+  bars.selectAll('rect.day-bar').attr('fill', column => selectedIndex >= column.start && selectedIndex <= column.end ? DETECTION_COLOR : '#6e879e');
+  const selectedX = timeScale(+firstDay + selectedIndex * DAY);
+  playhead.attr('transform', `translate(${selectedX},0)`).attr('display', selectedX < timelineMargin.left || selectedX > timelineWidth - timelineMargin.right ? 'none' : null);
+  viewport.setAttribute('aria-valuenow', selectedIndex);
+  viewport.setAttribute('aria-valuetext', selectedDate());
+}
+function zoomTimeline(factor, anchorX) {
+  const x = Math.max(timelineMargin.left, Math.min(timelineWidth - timelineMargin.right, anchorX));
+  const anchorDay = viewStart + (x - timelineMargin.left) / pixelsPerDay;
+  pixelsPerDay = Math.max(plotWidth() / (daySpan + 1), Math.min(80, pixelsPerDay * factor));
+  viewStart = anchorDay - (x - timelineMargin.left) / pixelsPerDay;
+  drawHistogram();
+}
+viewport.addEventListener('wheel', event => {
+  const zooming = event.ctrlKey || event.metaKey;
+  const raw = zooming ? (Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY)
+    : event.deltaX || (event.shiftKey ? event.deltaY : 0);
+  if (!raw) return; // Ordinary vertical wheel continues to scroll the page.
+  event.preventDefault();
+  const delta = raw * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? plotWidth() : 1);
+  if (zooming) zoomTimeline(Math.exp(-Math.max(-250, Math.min(250, delta)) * 0.004), d3.pointer(event, histogram.node())[0]);
+  else { viewStart += delta / pixelsPerDay; drawHistogram(); }
+}, { passive: false });
+let scrubPointer = null;
+function scrub(event) {
   const [x] = d3.pointer(event, histogram.node());
-  const day = d3.utcDay.round(timeScale.invert(x));
-  date.value = Math.max(0, Math.min(daySpan, d3.utcDay.count(firstDay, day)));
-  date.dispatchEvent(new Event('input'));
+  const bounded = Math.max(timelineMargin.left, Math.min(timelineWidth - timelineMargin.right, x));
+  selectDay(d3.utcDay.count(firstDay, d3.utcDay.round(timeScale.invert(bounded))), { reveal: false });
+}
+histogram.on('pointerdown', event => {
+  if (event.button !== 0 || d3.pointer(event, histogram.node())[0] < timelineMargin.left) return;
+  event.preventDefault();
+  scrubPointer = event.pointerId;
+  viewport.focus({ preventScroll: true });
+  histogram.node().setPointerCapture(event.pointerId);
+  scrub(event);
+}).on('pointermove', event => {
+  if (event.pointerId === scrubPointer) scrub(event);
+}).on('pointerup pointercancel lostpointercapture', event => {
+  if (event.pointerId === scrubPointer) scrubPointer = null;
+});
+viewport.setAttribute('aria-valuemin', 0);
+viewport.setAttribute('aria-valuemax', daySpan);
+function stepDateWithArrow(event) {
+  if (event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return;
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+  const target = event.target;
+  if (target instanceof Element && (target.isContentEditable || target.closest('input, textarea, select, [role="textbox"]'))) return;
+  const step = event.shiftKey ? 7 : 1;
+  event.preventDefault();
+  selectDay(selectedIndex + (event.key === 'ArrowRight' ? step : -step));
+}
+window.addEventListener('keydown', stepDateWithArrow);
+viewport.addEventListener('keydown', event => {
+  if (event.key === 'Home' || event.key === 'End') {
+    event.preventDefault(); selectDay(event.key === 'Home' ? 0 : daySpan);
+  } else if (['+', '=', '-'].includes(event.key)) {
+    event.preventDefault(); zoomTimeline(event.key === '-' ? 0.8 : 1.25, timelineMargin.left + plotWidth() / 2);
+  } else if (event.key === 'PageUp' || event.key === 'PageDown') {
+    event.preventDefault(); viewStart += visibleSpan() * (event.key === 'PageDown' ? 0.8 : -0.8); drawHistogram();
+  }
 });
 async function loadHistogram() {
   if (countsRequested) return;
@@ -141,9 +247,10 @@ async function loadHistogram() {
     const byDate = new Map(summary.days.map(day => [day.date, day]));
     countDays = d3.utcDay.range(firstDay, d3.utcDay.offset(lastDay, 1)).map(day => {
       const key = d3.utcFormat('%Y-%m-%d')(day);
-      return byDate.get(key) ?? { date: key, groups: null };
+      return { ...(byDate.get(key) ?? { date: key, groups: null }), index: d3.utcDay.count(firstDay, day) };
     });
     document.querySelector('#data-updated').textContent = 'Downloaded detections and counts updated ' + summary.generatedAt.slice(0, 10) + ' (UTC). Recent records may lack inferred source type; gray timeline marks mean unavailable counts.';
+    countSignature = ''; filteredCounts = null;
     drawHistogram();
   } catch (error) {
     countsRequested = false;
@@ -152,27 +259,12 @@ async function loadHistogram() {
   }
 }
 document.querySelector('#retry-counts').addEventListener('click', loadHistogram);
-
-// Align calendar ticks with the usable slider track, including its thumb inset.
-const timeline = d3.select('#timeline-ticks');
-function layoutTimeline() {
-  // Fixed spacing of 3 CSS pixels/day: adding years increases scroll width,
-  // never compresses the bars, slider, or month labels.
-  const width = daySpan * 3 + 16;
-  track.style.width = width + 'px';
-  timelineWidth = width;
-  const scale = timeScale.range([8, width - 8]);
-  timeline.attr('viewBox', `0 0 ${width} 48`);
-  timeline.selectAll('*').remove();
-  timeline.append('g').attr('transform', 'translate(0,1)')
-    .call(d3.axisBottom(scale).ticks(d3.utcMonth.every(1)).tickFormat(d3.utcFormat('%b')).tickSize(6))
-    .call(g => g.select('.domain').remove());
-  timeline.selectAll('text.year-label').data(d3.utcYear.range(firstDay, d3.utcDay.offset(lastDay, 1)))
-    .join('text').attr('class', 'year-label').attr('x', day => scale(day)).attr('y', 44).text(d3.utcFormat('%Y'));
+new ResizeObserver(([entry]) => {
+  const center = timelineWidth ? viewStart + visibleSpan() / 2 : selectedIndex;
+  timelineWidth = entry.contentRect.width;
+  viewStart = center - visibleSpan() / 2;
   drawHistogram();
-  revealDate();
-}
-new ResizeObserver(layoutTimeline).observe(viewport);
+}).observe(viewport);
 
 
 scene.append('path').attr('class', 'land').attr('fill', '#e6e6e6');
@@ -232,7 +324,7 @@ function updateSelection() {
   document.querySelector('#clear-selection').disabled = !region;
   const summary = document.querySelector('#selection-status');
   if (!region) {
-    summary.textContent = 'Toggle Select region to draw a rectangle; scroll to zoom in either mode.';
+    summary.textContent = 'Scroll to zoom · Drag to pan · Select region to draw a rectangle.';
     return;
   }
   if (!data) { summary.textContent = 'Region selected; waiting for the selected date’s data.'; return; }
@@ -257,80 +349,123 @@ function visibility() {
 for (const id of ['aod-layer', 'fire-layer']) document.querySelector(`#${id}`).addEventListener('input', visibility);
 
 // The fixed scale lets dates be compared without silently rescaling the colors.
-const aodLegend = d3.select('#legend').append('svg').attr('viewBox', '0 0 500 85').attr('role', 'img').attr('aria-label', 'AOD bins: below 0.2, 0.2 to 0.5, 0.5 to 1, 1 to 2, and 2 or higher.');
+const aodLegend = d3.select('#legend').append('svg').attr('viewBox', '0 0 160 230').attr('role', 'img')
+  .attr('aria-label', 'Aerosol optical depth: five Viridis bins. Gray indicates unavailable observations.');
+aodLegend.append('text').attr('class', 'legend-heading').attr('x', 5).attr('y', 16).text('Aerosol optical depth');
+aodLegend.append('text').attr('x', 5).attr('y', 34).text('(approximate)');
 const binLabels = ['0–<0.2', '0.2–<0.5', '0.5–<1', '1–<2', '≥2'];
-aodLegend.selectAll('rect').data(color.range()).join('rect').attr('x', (_, i) => 10 + i * 96).attr('y', 10).attr('width', 96).attr('height', 12).attr('fill', d => d);
-aodLegend.selectAll('.bin-label').data(binLabels).join('text').attr('class', 'bin-label').attr('x', (_, i) => 58 + i * 96).attr('y', 40).attr('text-anchor', 'middle').text(d => d);
-aodLegend.append('text').attr('x', 10).attr('y', 65).text('Aerosol optical depth (approximate)');
-const powerLegend = d3.select('#legend').append('svg').attr('viewBox', '0 0 400 100').attr('role', 'img').attr('aria-label', 'Thermal detections use orange markers. Opacity scales linearly with FRP up to full opacity at 100 MW; unknown power uses 50% opacity.');
-powerLegend.append('text').attr('x',10).attr('y',65).text('Thermal detections · radiative power (FRP)');
-const opacityExamples = [{ frp: 10 }, { frp: 50 }, { frp: 100 }];
+const aodBins = color.range().map((fill, i) => ({ fill, label: binLabels[i] })).reverse();
+aodLegend.selectAll('rect.aod-bin').data(aodBins).join('rect').attr('class', 'aod-bin').attr('x', 8).attr('y', (_, i) => 48 + i * 29).attr('width', 22).attr('height', 29).attr('fill', d => d.fill);
+aodLegend.selectAll('text.bin-label').data(aodBins).join('text').attr('class', 'bin-label').attr('x', 39).attr('y', (_, i) => 67 + i * 29).text(d => d.label);
+aodLegend.append('rect').attr('x', 8).attr('y', 207).attr('width', 22).attr('height', 16).attr('fill', '#e6e6e6');
+aodLegend.append('text').attr('x', 39).attr('y', 219).text('Unavailable');
+const powerLegend = d3.select('#legend').append('svg').attr('viewBox', '0 0 160 240').attr('role', 'img')
+  .attr('aria-label', 'Thermal detection opacity ranges: below 25 MW, 25 to 50, 50 to 75, 75 to 100, and at least 100 MW. Opacity varies continuously, reaching full opacity at 100 MW.');
+powerLegend.append('text').attr('class', 'legend-heading').attr('x', 5).attr('y', 16).text('Thermal detections');
+powerLegend.append('text').attr('x', 5).attr('y', 34).text('Radiative power (MW)');
+const opacityExamples = [
+  { frp: 12.5, label: '0–<25' }, { frp: 37.5, label: '25–<50' },
+  { frp: 62.5, label: '50–<75' }, { frp: 87.5, label: '75–<100' },
+  { frp: 100, label: '≥100' }, { frp: null, label: 'Unknown' },
+];
 powerLegend.selectAll('circle.opacity-example').data(opacityExamples).join('circle').attr('class', 'opacity-example')
-  .attr('cx', (_, i) => 15 + i * 130).attr('cy', 26).attr('r', radius).attr('fill', DETECTION_COLOR).attr('opacity', powerOpacity);
+  .attr('cx', 19).attr('cy', (_, i) => 55 + i * 27).attr('r', radius).attr('fill', DETECTION_COLOR).attr('opacity', powerOpacity);
 powerLegend.selectAll('text.opacity-label').data(opacityExamples).join('text').attr('class', 'opacity-label')
-  .attr('x', (_, i) => 28 + i * 130).attr('y', 31).text(d => `${d.frp} MW`);
-powerLegend.append('text').attr('x', 10).attr('y', 90).text('Opacity: FRP / 100 MW, capped at 100%');
+  .attr('x', 39).attr('y', (_, i) => 59 + i * 27).text(d => d.label);
+powerLegend.append('text').attr('x', 5).attr('y', 236).text('Opacity varies continuously');
 
+let lastRaster;
+const rasterGeometry = new Map();
+let baseReady = false;
+let warmTimer;
+function warmNeighbors(date) {
+  clearTimeout(warmTimer);
+  warmTimer = setTimeout(() => {
+    if (selectedDate() === date && data?.days[0].date === date) prefetchDays(date).catch(() => {});
+  }, 100);
+}
 function render() {
   if (!data) return;
   const day = data.days[0];
-  calendar.value = day.date;
-  const [west, south, east, north] = CALIFORNIA_BOUNDS;
-  const dx = (east - west) / (day.aod?.width ?? 240);
-  const dy = (north - south) / (day.aod?.height ?? 223);
-  aerosols.selectAll('rect').data(day.aod?.cells.filter(cell => cell.value !== null) ?? []).join('rect')
-    .attr('x', d => projection([d.longitude - dx / 2, d.latitude + dy / 2])[0])
-    .attr('y', d => projection([d.longitude - dx / 2, d.latitude + dy / 2])[1])
-    .attr('width', d => projection([d.longitude + dx / 2, d.latitude])[0] - projection([d.longitude - dx / 2, d.latitude])[0] + 0.05)
-    .attr('height', d => projection([d.longitude, d.latitude - dy / 2])[1] - projection([d.longitude, d.latitude + dy / 2])[1] + 0.05)
-    .attr('fill', d => color(d.value))
-    .selectAll('title').data(d => [d]).join('title').text(d => `AOD ≈ ${d.value.toFixed(3)} (range ${d.lower}–${d.upper})\n${d.latitude.toFixed(2)}°N, ${d.longitude.toFixed(2)}°E`);
+  calendar.value = selectedDate();
+  if (day.aod !== lastRaster) {
+    const [west, south, east, north] = CALIFORNIA_BOUNDS;
+    const dx = (east - west) / 240, dy = (north - south) / 223;
+    function geometry(cell) {
+      if (!rasterGeometry.has(cell.index)) {
+        const a = projection([cell.longitude - dx / 2, cell.latitude + dy / 2]);
+        const b = projection([cell.longitude + dx / 2, cell.latitude - dy / 2]);
+        rasterGeometry.set(cell.index, { x: a[0], y: a[1], width: b[0] - a[0] + 0.05, height: b[1] - a[1] + 0.05 });
+      }
+      return rasterGeometry.get(cell.index);
+    }
+    const cells = aerosols.selectAll('rect').data(day.aod?.cells.filter(cell => cell.value !== null) ?? [], cell => cell.index).join(
+      enter => {
+        const rectangles = enter.append('rect').attr('x', cell => geometry(cell).x).attr('y', cell => geometry(cell).y)
+          .attr('width', cell => geometry(cell).width).attr('height', cell => geometry(cell).height);
+        rectangles.append('title');
+        return rectangles;
+      }
+    ).attr('fill', cell => color(cell.value));
+    cells.select('title').text(cell => `${day.date} · AOD ≈ ${cell.value.toFixed(3)} (${cell.lower}–${cell.upper})\n${cell.latitude.toFixed(2)}°N, ${(-cell.longitude).toFixed(2)}°W`);
+    lastRaster = day.aod;
+  }
   fires.selectAll('circle').data(filteredFires(), d => d.id).join('circle')
     .attr('cx', d => projection([d.longitude, d.latitude])[0]).attr('cy', d => projection([d.longitude, d.latitude])[1])
     .attr('r', radius / d3.zoomTransform(svg.node()).k).attr('fill', DETECTION_COLOR)
     .attr('stroke', DETECTION_COLOR).attr('stroke-width', 0.35).attr('vector-effect', 'non-scaling-stroke').attr('tabindex', 0)
     .selectAll('title').data(d => [d]).join('title').text(d => `${d.date} ${d.acquisitionTime ?? ''} UTC\nType: ${detectionType(d).label} (inferred)\nConfidence: ${d.confidence ?? 'unavailable'}%\nFRP: ${d.frp ?? 'unavailable'} MW\n${d.latitude}°N, ${d.longitude}°E`);
   const errors = Object.entries(day.errors).map(([layer, message]) => `${layer}: ${message}`);
-  status.textContent = `${day.date} · ${day.fires === null ? 'Detections unavailable' : `${filteredFires().length.toLocaleString()} of ${day.fires.length.toLocaleString()} detections passing type and confidence filters`} · ${day.aod ? `${(day.aod.coverage * 100).toFixed(1)}% AOD coverage` : 'AOD unavailable'}${errors.length ? ` · ${errors.join('; ')}` : ''}`;
+  status.textContent = `${day.fires === null ? 'Detections unavailable' : `${filteredFires().length.toLocaleString()} of ${day.fires.length.toLocaleString()} detections passing type and confidence filters`} · ${day.aod ? `${(day.aod.coverage * 100).toFixed(1)}% AOD coverage` : 'AOD unavailable'}${errors.length ? ` · ${errors.join('; ')}` : ''}${day.date !== selectedDate() ? ` · Loading selected date; map still shows ${day.date}` : ''}`;
   retry.hidden = !data.days.some(day => Object.keys(day.errors).length);
   visibility();
   updateSelection();
 }
-date.addEventListener('input', () => {
+function selectDay(index, { reveal = true } = {}) {
+  const next = Math.max(0, Math.min(daySpan, Math.round(index)));
+  if (next === selectedIndex) { if (reveal) revealDate(); drawHistogram(); return; }
+  selectedIndex = next;
   // Invalidate earlier results immediately, even during the debounce interval.
   selection++;
-  data = null;
+  stopPrefetch(selectedDate());
+  clearTimeout(warmTimer);
   clearTimeout(debounce);
   calendar.value = selectedDate();
+  if (reveal) revealDate();
   drawHistogram();
-  revealDate();
-  date.setAttribute('aria-valuetext', selectedDate());
-  aerosols.selectAll('rect').remove();
-  fires.selectAll('circle').remove();
-  updateSelection();
-  status.textContent = `Loading MODIS data for ${selectedDate()}…`;
-  retry.hidden = true;
-  debounce = setTimeout(load, 180);
-});
+  const ready = getCachedDay(selectedDate());
+  if (ready && baseReady) {
+    data = { days: [ready] }; render(); svg.attr('aria-busy', 'false'); warmNeighbors(selectedDate());
+    return;
+  }
+  // Keep the displayed map intact while the requested date loads.
+  status.textContent = `Loading selected date…${data ? ' Map still shows ' + data.days[0].date : ''}`;
+  svg.attr('aria-busy', 'true'); retry.hidden = true;
+  debounce = setTimeout(load, 100);
+}
 
 async function load() {
   const version = ++selection;
   const requestedDate = selectedDate();
   retry.hidden = true;
-  status.textContent = `Loading MODIS data for ${requestedDate}…`;
+  status.textContent = `Loading selected date…${data ? ' Map still shows ' + data.days[0].date : ''}`;
   svg.attr('aria-busy', 'true');
   try {
     // Display the outline before imagery arrives; request only this day's layers.
+    if (!baseReady) {
     const [california, counties] = await Promise.all([loadCalifornia(), loadCounties()]);
     if (version !== selection) return;
     projection.fitExtent([[30, 20], [770, 630]], california);
     scene.selectAll('.land, .boundary').datum(california).attr('d', path);
     clip.datum(california).attr('d', path);
     countiesLayer.selectAll('path').data(counties.features).join('path').attr('d', path).attr('stroke-width', 0.6).attr('vector-effect', 'non-scaling-stroke');
+    baseReady = true;
+    }
     const next = await loadMODIS({ start: requestedDate, end: requestedDate });
     if (version !== selection) return;
     data = next;
     render();
+    warmNeighbors(requestedDate);
     // Counts are a compact aggregate file; never fetch all daily map records.
     // Let the initial map paint before requesting the histogram.
     requestAnimationFrame(() => setTimeout(loadHistogram, 0));

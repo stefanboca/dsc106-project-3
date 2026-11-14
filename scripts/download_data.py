@@ -108,7 +108,16 @@ def boundaries(cache):
         raise ValueError(f"Expected 58 counties, got {len(features)}")
     save(DATA / "california.json", california)
     save(DATA / "california-counties.json", {"type": "FeatureCollection", "features": features})
-    return prep(shape(california["geometry"])), sources
+    mask = prep(shape(california["geometry"]))
+    # Static pixel-center mask: the browser must not run polygon containment
+    # tens of thousands of times after every daily AOD image arrives.
+    width, height = 240, 223
+    indices = [y * width + x for y in range(height) for x in range(width)
+               if mask.covers(Point(-125 + (x + 0.5) / width * 11,
+                                    42.2 - (y + 0.5) / height * 10.2))]
+    save(DATA / "aod-grid.json", {"width": width, "height": height,
+                                  "bounds": [-125, 32, -114, 42.2], "indices": indices})
+    return mask, sources
 
 
 def numeric(value):
@@ -120,11 +129,15 @@ def main():
     parser.add_argument("--end", type=dt.date.fromisoformat, default=dt.datetime.now(dt.timezone.utc).date())
     parser.add_argument("--cache-dir", type=Path, default=ROOT / ".cache" / "modis-downloads")
     parser.add_argument("--workers", type=int, default=6)
+    parser.add_argument("--boundaries-only", action="store_true", help="Refresh boundaries and AOD pixel mask only")
     args = parser.parse_args()
     if args.end < START or args.end > dt.datetime.now(dt.timezone.utc).date() or not 1 <= args.workers <= 12:
         parser.error("Choose an end date between 2020-01-01 and today; workers must be 1–12")
     cache = args.cache_dir
     california, boundary_sources = boundaries(cache)
+    if args.boundaries_only:
+        print("Saved state/county boundaries and AOD pixel mask", flush=True)
+        return
     dates = [START + dt.timedelta(days=i) for i in range((args.end - START).days + 1)]
     counts = {}
     sources = {}
