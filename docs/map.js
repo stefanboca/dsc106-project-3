@@ -176,7 +176,14 @@ function renderHistogram() {
     const interval = yearsOnly ? d3.utcYear.every(Math.max(1, Math.ceil(span / 365 / (plotWidth() / 64)))) :
       span > 730 ? d3.utcMonth.every(3) : span > 120 ? d3.utcMonth : span > 35 ? d3.utcMonday : d3.utcDay.every(Math.max(1, Math.ceil(55 / pixelsPerDay)));
     const tickFormat = d3.utcFormat(yearsOnly ? '%Y' : span > 120 ? '%b' : '%b %d');
-    calendarAxis.attr('transform', 'translate(0,123)').call(d3.axisBottom(timeScale).ticks(interval).tickFormat(tickFormat).tickSize(5))
+    let previousTickX = -Infinity;
+    const tickDates = timeScale.ticks(interval).filter(day => {
+      const x = timeScale(day);
+      if (x - previousTickX < 52) return false;
+      previousTickX = x;
+      return true;
+    });
+    calendarAxis.attr('transform', 'translate(0,123)').call(d3.axisBottom(timeScale).tickValues(tickDates).tickFormat(tickFormat).tickSize(5))
       .call(g => g.select('.domain').attr('stroke', '#cbd5e1'));
     const [start, end] = timeScale.domain();
     const labels = [];
@@ -208,11 +215,12 @@ function zoomTimeline(factor, anchorX) {
   drawHistogram();
 }
 viewport.addEventListener('wheel', event => {
+  event.preventDefault();
+  event.stopPropagation();
   const zooming = event.ctrlKey || event.metaKey;
   const raw = zooming ? (Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY)
     : event.deltaX || (event.shiftKey ? event.deltaY : 0);
-  if (!raw) return; // Ordinary vertical wheel continues to scroll the page.
-  event.preventDefault();
+  if (!raw) return;
   const delta = raw * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? plotWidth() : 1);
   if (zooming) zoomTimeline(Math.exp(-Math.max(-250, Math.min(250, delta)) * 0.004), d3.pointer(event, histogram.node())[0]);
   else { viewStart += delta / pixelsPerDay; drawHistogram(); }
@@ -390,6 +398,12 @@ const zoom = d3.zoom().scaleExtent([1, 10])
   syncBrush();
 });
 svg.call(zoom);
+// D3 lets wheel events through at its zoom limits. Keep them inside the map
+// even when a wheel gesture cannot change the current zoom any further.
+svg.node().addEventListener('wheel', event => {
+  event.preventDefault();
+  event.stopPropagation();
+}, { passive: false });
 interaction.addEventListener('click', () => {
   selecting = !selecting;
   interaction.setAttribute('aria-pressed', String(selecting));
@@ -425,6 +439,8 @@ function layoutMap() {
     countiesLayer.selectAll('path').data(mapCounties.features).join('path').attr('d', path)
       .attr('stroke-width', 0.6).attr('vector-effect', 'non-scaling-stroke');
     rasterGeometry.clear(); lastRaster = undefined;
+    // Existing rectangles otherwise retain positions from the old projection.
+    aerosols.selectAll('rect').remove();
     if (oldCenter && (oldTransform.k !== 1 || oldTransform.x !== 0 || oldTransform.y !== 0)) {
       const center = projection(oldCenter);
       svg.call(zoom.transform, d3.zoomIdentity.translate(width / 2 - oldTransform.k * center[0], height / 2 - oldTransform.k * center[1]).scale(oldTransform.k));

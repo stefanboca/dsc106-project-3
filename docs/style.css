@@ -81,3 +81,4 @@ input[type='range'] { accent-color: #166a9f; }
   .desktop-timeline-hint { display: none; }
   .touch-timeline-hint { display: inline; }
 }
+#timeline-viewport, #map { overscroll-behavior: none; }
