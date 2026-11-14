@@ -1,8 +1,5 @@
 // MODIS data access for the California thermal-anomaly / aerosol visualization.
 // No requests run until loadMODIS() is called. All dates are UTC calendar dates.
-import { VectorTile } from "https://cdn.jsdelivr.net/npm/@mapbox/vector-tile@2.0.4/+esm";
-import Pbf from "https://cdn.jsdelivr.net/npm/pbf@4.0.1/+esm";
-import { feature } from "https://cdn.jsdelivr.net/npm/topojson-client@3/+esm";
 import { geoContains } from "https://cdn.jsdelivr.net/npm/d3-geo@3/+esm";
 
 const GIBS = "https://gibs.earthdata.nasa.gov";
@@ -66,68 +63,33 @@ function number(value) {
 }
 
 export function loadCalifornia() {
-  return cached("california", async () => {
-    const topology = await (
-      await request("https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json")
-    ).json();
-    return feature(
-      topology,
-      topology.objects.states.geometries.find(
-        (state) => Number(state.id) === 6,
-      ),
-    );
-  });
+  return cached('california', async () => (await request(new URL('data/california.json', import.meta.url))).json());
+}
+export function loadCounties() {
+  return cached('counties', async () => (await request(new URL('data/california-counties.json', import.meta.url))).json());
+}
+export function loadManifest() {
+  return cached('thermal-manifest', async () => (await request(new URL('data/thermal-manifest.json', import.meta.url))).json());
 }
 
-// At this GIBS matrix, one tile covers California (108–144°W, 18–54°N).
-// Use record coordinates for clipping, not rendered fire symbols or tile geometry.
-async function loadFires(date, satellite, california) {
-  const url = `${GIBS}/wmts/epsg4326/best/MODIS_${satellite}_Thermal_Anomalies_All/default/${date}/1km/3/1/1.mvt`;
-  return cached(url, async () => {
-    const response = await request(url);
-    let bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes[0] === 31 && bytes[1] === 139) {
-      bytes = new Uint8Array(
-        await new Response(
-          new Blob([bytes])
-            .stream()
-            .pipeThrough(new DecompressionStream("gzip")),
-        ).arrayBuffer(),
-      );
-    }
-    const tile = new VectorTile(new Pbf(bytes));
-    const records = [],
-      seen = new Set();
-    for (const layer of Object.values(tile.layers)) {
-      for (let i = 0; i < layer.length; i++) {
-        const p = layer.feature(i).properties;
-        const longitude = number(p.LONGITUDE),
-          latitude = number(p.LATITUDE);
-        if (
-          String(p.ACQ_DATE).slice(0, 10) !== date ||
-          longitude === null ||
-          latitude === null ||
-          !geoContains(california, [longitude, latitude])
-        )
-          continue;
-        const id = `${date}/${satellite}/${p.UID ?? `${longitude}/${latitude}/${p.ACQ_TIME}/${p.FRP}`}`;
-        if (seen.has(id)) continue;
-        seen.add(id);
-        records.push({
-          id,
-          date,
-          satellite,
-          longitude,
-          latitude,
-          confidence: number(p.CONFIDENCE),
-          frp: number(p.FRP),
-          brightness: number(p.BRIGHTNESS),
-          dayNight: p.DAYNIGHT ?? null,
-          acquisitionTime: p.ACQ_TIME ?? null,
-        });
-      }
-    }
-    return { records, source: url };
+// Detections are downloaded by scripts/download_data.py. No browser API fallback.
+async function loadFires(date, satellite) {
+  const manifest = await loadManifest();
+  const source = manifest.sources[date];
+  if (!source) throw new Error('Downloaded detections unavailable for this date; rerun scripts/download_data.py to refresh.');
+  if (satellite !== 'Terra' && source.includes('gibs.earthdata')) throw new Error('Recent downloaded detections are Terra only.');
+  const url = new URL(`data/thermal/${date}.json`, import.meta.url).href;
+  return cached(`${url}/${satellite}`, async () => {
+    const rows = await (await request(url)).json();
+    // Records were already clipped to California by the downloader, using the
+    // same saved records to build daily counts. Do not apply a different mask.
+    const records = rows.filter(row => row[2] === satellite).map((row, index) => ({
+      id: `${date}/${satellite}/${index}`, date, satellite,
+      longitude: row[0], latitude: row[1],
+      acquisitionTime: `${row[3].slice(0, 2)}:${row[3].slice(2)}`,
+      confidence: row[4], frp: row[5], brightness: row[6], dayNight: row[7], type: row[8],
+    }));
+    return { records, source };
   });
 }
 

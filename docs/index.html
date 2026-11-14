@@ -10,13 +10,107 @@
     <link rel="stylesheet" href="style.css" />
     <title>DSC 106 Project 3</title>
 
-    <script type="module" src="global.js"></script>
+    <script type="module" src="map.js"></script>
   </head>
   <body>
     <main class="container">
-      <h1>DSC 106 Project 3</h1>
-
-      <p>Hello DSC 106</p>
+      <h1>California thermal anomalies and aerosols</h1>
+      <div class="controls">
+        <label
+          ><input id="aod-layer" type="checkbox" checked /> Aerosol optical
+          depth</label
+        >
+        <label
+          ><input id="fire-layer" type="checkbox" checked /> Thermal
+          detections</label
+        >
+        <div class="confidence-control">
+        <label for="confidence"
+          >Minimum confidence
+          <input
+            id="confidence"
+            type="range"
+            min="0"
+            max="100"
+            value="0"
+            step="5"
+          />
+          <output id="confidence-value">0%</output></label
+        >
+        <div class="info-tooltip">
+          <button id="confidence-info" class="info-button" type="button" popovertarget="confidence-help" aria-label="About detection confidence">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="7" r="1.2" fill="currentColor"/><path d="M12 11v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+          <div id="confidence-help" class="info-tooltip-content" popover>
+            MODIS assigns each thermal detection a confidence score from 0 to 100.
+            Higher scores indicate greater confidence in the detection, not a
+            stronger fire. This slider hides detections below the chosen score.
+            Detections with unknown confidence appear only at 0%. AOD is unaffected.
+          </div>
+        </div>
+        </div>
+        <button id="interaction" type="button" aria-pressed="false">
+          Select region
+        </button>
+        <button id="clear-selection" type="button" disabled>
+          Clear selection
+        </button>
+        <button id="reset" type="button">Reset zoom</button>
+        <button id="retry" type="button" hidden>Retry loading</button>
+      </div>
+      <div id="detection-types" role="group" aria-label="Inferred hotspot types"><span>Inferred hotspot type</span></div>
+      <p id="status" role="status" aria-live="polite">Loading MODIS data…</p>
+      <div class="timeline">
+        <div class="timeline-header">
+          <label for="calendar-date">Date (UTC)</label>
+          <input id="calendar-date" type="date" min="2020-01-01" max="2020-12-31" value="2020-09-09" required />
+          <button id="today" type="button">Today</button>
+        </div>
+        <p id="histogram-status" class="histogram-caption">Daily California detections · counts load after the map</p>
+        <div id="timeline-viewport" tabindex="0" role="group" aria-label="Scrollable timeline. Scroll horizontally for more dates.">
+        <div id="timeline-track">
+        <svg id="detection-histogram" role="img" aria-label="Daily California thermal detection counts. Click a day to select it; use the date slider or calendar for keyboard selection."></svg>
+        <button id="retry-counts" type="button" hidden>Retry daily counts</button>
+        <input
+          id="date"
+          type="range"
+          min="0"
+          max="365"
+          value="252"
+          step="1"
+          aria-label="Map date"
+        />
+        <svg id="timeline-ticks" aria-hidden="true"></svg>
+        </div>
+        </div>
+        <p class="histogram-caption">Scroll horizontally for more dates, or use the calendar.</p>
+      </div>
+      <svg
+        id="map"
+        viewBox="0 0 800 650"
+        role="img"
+        aria-labelledby="map-title map-description"
+      >
+        <title id="map-title">
+          California thermal detections over aerosol optical depth
+        </title>
+        <desc id="map-description">
+          Use the date slider to compare days. Scroll to zoom and drag to pan.
+          Toggle Select region to draw a rectangle.
+        </desc>
+      </svg>
+      <div id="legend"></div>
+      <p id="selection-status" role="status" aria-live="polite">
+        Toggle Select region to draw a rectangle; scroll to zoom in either mode.
+      </p>
+      <p id="data-updated" class="note"></p>
+      <p class="note">AOD is approximate; gray map areas have no usable observation.
+        Detections use equal-size orange markers.
+        Opacity is proportional to FRP, capped at full opacity at 100 MW; unknown power uses 50% opacity.
+        Marker size stays constant on screen while zooming.
+        Hotspot types are inferred, not confirmed causes; “vegetation fire” means presumed vegetation fire.
+        Fire records: <a href="https://firms.modaps.eosdis.nasa.gov/country/">NASA FIRMS annual MODIS records</a> plus recent GIBS Terra records, downloaded locally and loaded by day. AOD remains live GIBS imagery.
+        Points are detections, not distinct fires. Unknown confidence is included only at 0%.</p>
     </main>
   </body>
 </html>
