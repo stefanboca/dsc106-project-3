@@ -13,71 +13,348 @@
       <div class="workspace">
         <aside class="sidebar" aria-label="Map filters">
           <div class="controls">
-            <div class="layer-control"><label><input id="aod-layer" type="checkbox" checked /> Aerosol optical depth</label><button class="info-button" type="button" popovertarget="aod-help" aria-label="About aerosol optical depth"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="7" r="1.2" fill="currentColor"/><path d="M12 11v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
-            <div id="aod-help" class="info-tooltip-content" popover>Aerosol optical depth (AOD) measures how much particles in the atmospheric column attenuate light. Higher values indicate more aerosol loading. It is not a ground-level air-quality measurement. Colors show approximate ranges decoded from MODIS imagery; gray areas have no usable observation.</div>
-            <div class="layer-control"><label><input id="fire-layer" type="checkbox" checked /> Thermal detections</label><button class="info-button" type="button" popovertarget="thermal-help" aria-label="About thermal detections"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="7" r="1.2" fill="currentColor"/><path d="M12 11v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
-            <div id="thermal-help" class="info-tooltip-content" popover>MODIS detects satellite pixels with thermal anomalies, not separate fires. Orange dots have a constant screen size. Opacity increases with fire radiative power (FRP, in megawatts), reaching full opacity at 100 MW. Source types are inferred; recent records may have an unknown type.</div>
+            <div class="layer-control">
+              <label
+                ><input id="aod-layer" type="checkbox" checked /> Aerosol
+                optical depth</label
+              ><button
+                class="info-button"
+                type="button"
+                popovertarget="aod-help"
+                aria-label="About aerosol optical depth"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="20"
+                  height="20"
+                  aria-hidden="true"
+                >
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                  />
+                  <circle cx="12" cy="7" r="1.2" fill="currentColor" />
+                  <path
+                    d="M12 11v6"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                  />
+                </svg>
+              </button>
+            </div>
+            <div id="aod-help" class="info-tooltip-content" popover>
+              Aerosol optical depth (AOD) measures how much particles in the
+              atmospheric column attenuate light. Higher values indicate more
+              aerosol loading. It is not a ground-level air-quality measurement.
+              Colors show approximate ranges decoded from MODIS imagery; gray
+              areas have no usable observation.
+            </div>
+            <div class="layer-control">
+              <label
+                ><input id="fire-layer" type="checkbox" checked /> Thermal
+                detections</label
+              ><button
+                class="info-button"
+                type="button"
+                popovertarget="thermal-help"
+                aria-label="About thermal detections"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="20"
+                  height="20"
+                  aria-hidden="true"
+                >
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                  />
+                  <circle cx="12" cy="7" r="1.2" fill="currentColor" />
+                  <path
+                    d="M12 11v6"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                  />
+                </svg>
+              </button>
+            </div>
+            <div id="thermal-help" class="info-tooltip-content" popover>
+              MODIS detects satellite pixels with thermal anomalies, not
+              separate fires. Orange dots have a constant screen size. Opacity
+              increases with fire radiative power (FRP, in megawatts), reaching
+              full opacity at 100 MW. Source types are inferred; recent records
+              may have an unknown type.
+            </div>
             <div class="confidence-control">
               <div class="confidence-heading">
                 <label for="confidence">Minimum confidence</label>
-                <button id="confidence-info" class="info-button" type="button" popovertarget="confidence-help" aria-label="About detection confidence">
-                  <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="7" r="1.2" fill="currentColor"/><path d="M12 11v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <button
+                  id="confidence-info"
+                  class="info-button"
+                  type="button"
+                  popovertarget="confidence-help"
+                  aria-label="About detection confidence"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="20"
+                    height="20"
+                    aria-hidden="true"
+                  >
+                    <circle
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                    />
+                    <circle cx="12" cy="7" r="1.2" fill="currentColor" />
+                    <path
+                      d="M12 11v6"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                    />
+                  </svg>
                 </button>
               </div>
-              <div class="confidence-slider"><input id="confidence" type="range" min="0" max="100" value="0" step="5" /><output id="confidence-value">0%</output></div>
+              <div class="confidence-slider">
+                <input
+                  id="confidence"
+                  type="range"
+                  min="0"
+                  max="100"
+                  value="0"
+                  step="5"
+                /><output id="confidence-value">0%</output>
+              </div>
               <div id="confidence-help" class="info-tooltip-content" popover>
-                MODIS assigns each thermal detection a confidence score from 0 to 100.
-                Higher scores indicate greater confidence in the detection, not a stronger fire.
-                This slider hides detections below the chosen score. Detections with unknown
-                confidence appear only at 0%. AOD is unaffected.
+                MODIS assigns each thermal detection a confidence score from 0
+                to 100. Higher scores indicate greater confidence in the
+                detection, not a stronger fire. This slider hides detections
+                below the chosen score. Detections with unknown confidence
+                appear only at 0%. AOD is unaffected.
               </div>
             </div>
           </div>
-          <div id="detection-types" role="group" aria-label="Inferred hotspot types"><span>Inferred hotspot type</span></div>
+          <div
+            id="detection-types"
+            role="group"
+            aria-label="Inferred hotspot types"
+          >
+            <span>Inferred hotspot type</span>
+          </div>
         </aside>
         <section class="visualization" aria-label="Timeline and map">
           <div class="timeline">
             <div class="timeline-header">
               <label for="calendar-date">Date (UTC)</label>
-              <input id="calendar-date" type="date" min="2000-02-24" value="2020-09-09" required />
+              <input
+                id="calendar-date"
+                type="date"
+                min="2000-02-24"
+                value="2020-09-09"
+                required
+              />
             </div>
-            <p id="histogram-status" class="histogram-caption">Daily California detections · counts load after the map</p>
-            <button id="retry-counts" type="button" hidden>Retry daily counts</button>
-            <div id="timeline-viewport" tabindex="0" role="slider" aria-label="Map date. One finger or mouse drag to scrub. Two fingers to pan and pinch to zoom. Horizontal scroll to pan; Control plus scroll to zoom.">
+            <p id="histogram-status" class="histogram-caption">
+              Daily California detections · counts load after the map
+            </p>
+            <button id="retry-counts" type="button" hidden>
+              Retry daily counts
+            </button>
+            <div
+              id="timeline-viewport"
+              tabindex="0"
+              role="slider"
+              aria-label="Map date. One finger or mouse drag to scrub. Two fingers to pan and pinch to zoom. Horizontal scroll to pan; Control plus scroll to zoom."
+            >
               <svg id="detection-histogram" aria-hidden="true"></svg>
             </div>
-            <p class="timeline-hint"><span class="desktop-timeline-hint">Drag: scrub · Horizontal scroll: pan · Ctrl/⌘ + scroll: zoom · Arrow keys: step date</span><span class="touch-timeline-hint">One finger: scrub · Two-finger drag: pan · Pinch: zoom</span></p>
+            <p class="timeline-hint">
+              <span class="desktop-timeline-hint"
+                >Drag: scrub · Horizontal scroll: pan · Ctrl/⌘ + scroll: zoom ·
+                Arrow keys: step date</span
+              ><span class="touch-timeline-hint"
+                >One finger: scrub · Two-finger drag: pan · Pinch: zoom</span
+              >
+            </p>
           </div>
-          <p id="status" role="status" aria-live="polite">Loading MODIS data…</p>
+          <p id="status" role="status" aria-live="polite">
+            Loading MODIS data…
+          </p>
           <div class="map-row">
-            <svg id="map" viewBox="0 0 800 650" role="img" aria-label="California thermal detections over aerosol optical depth" aria-describedby="map-description">
-              <desc id="map-description">Scroll to zoom and drag to pan. Toggle Select region to draw a rectangle.</desc>
+            <svg
+              id="map"
+              viewBox="0 0 800 650"
+              role="img"
+              aria-label="California thermal detections over aerosol optical depth"
+              aria-describedby="map-description"
+            >
+              <desc id="map-description">
+                Scroll to zoom and drag to pan. Toggle Select region to draw a
+                rectangle.
+              </desc>
             </svg>
             <aside id="legend" aria-label="Map legends"></aside>
           </div>
           <div class="map-actions">
-            <button id="interaction" type="button" aria-pressed="false">Select region</button>
-            <button id="clear-selection" type="button" disabled>Clear selection</button>
+            <button id="interaction" type="button" aria-pressed="false">
+              Select region
+            </button>
+            <button id="clear-selection" type="button" disabled>
+              Clear selection
+            </button>
             <button id="reset" type="button">Reset zoom</button>
             <button id="retry" type="button" hidden>Retry loading</button>
           </div>
-          <p id="selection-status" role="status" aria-live="polite">Scroll to zoom · Drag to pan · Select region to draw a rectangle.</p>
+          <p id="selection-status" role="status" aria-live="polite">
+            Scroll to zoom · Drag to pan · Select region to draw a rectangle.
+          </p>
+        </section>
+        <section class="methods" aria-labelledby="methods-title">
+          <h2 id="methods-title">Data and methods</h2>
+          <p>
+            We first started off by overlaying a map of California with the Dark
+            Target Aerosol Optical Depth layer from the NASA MODIS dataset and
+            the Fires and Thermal Anomalies layer from the same dataset. We
+            added a checkmark filter for the aerosol optical depth layer and the
+            thermal detections layer so the reader can filter by those and
+            choose to only see one or the other. For the thermal detections, we
+            visualize those as circles. We initially scaled the size of the
+            circles by their FRP (which is basically their intensity) but then
+            realized this might confuse the readers into thinking a larger size
+            circle indicates a larger area coverage of that thermal anomaly when
+            that isn't necessarily the case. We solve this by implementing a
+            color scale (noted in the next paragraph). Also, we made it so when
+            you zoom into the map, the points are physically the same size but
+            more spread out because we are zooming in. Also, each thermal
+            anomaly, when hovered over has a tooltip that contains information
+            such as date, time, confidence, FRP, longitude and latitude, and
+            type. Finally, we also added a slider for minimum confidence since
+            each thermal anomaly has a confidence value associated with it (how
+            confident the satellite was in detecting it). This lets users filter
+            by anomalies that have higher or lower confidence. We chose to do
+            this because a user might want to only look at anomalies which we
+            have high confidence were detected if they wanted to draw any
+            concrete conclusions.
+          </p>
+
+          <p>
+            For the aerosol optical depth color scale, we decided on the Viridis
+            color scale. We chose this scale because our color for the thermal
+            anomalies were planned to be some sort of orange, red color palette.
+            By choosing this color scale we avoid any color overlap.
+            Furthermore, we originally had continuous binning for the scale of
+            aerosol optical depth, but then we changed this to a discrete
+            binning because it makes it easier for the viewer to pick apart
+            distinct ranges of values. Similarly, for the thermal detection
+            color scale, we used a scale of increasing color intensity of
+            orange. These are also discretely binned.
+          </p>
+
+          <p>
+            We added a filter for dates and a calendar selector to make it
+            easier to choose the date you want to arrive at. We initially had a
+            scrollable timeline, but we felt this wasn't good for the reader
+            since if they wanted to find a specific date, they had to very
+            accurately scroll to the date, making it hard to find quickly unlike
+            the calendar selector. Furthermore, our initial scrollable timeline
+            only encompassed one year. If we wanted to include more years,
+            either we would have to have an extremely dense scrollable timeline,
+            which isn't user friendly, or a filter that changed between
+            scrollable timelines. We did not want this, so instead we created
+            the calendar selector and then replaced the scrollable timeline with
+            a scrollable histogram that encompassed the range of years we
+            picked. To solve the issue of having to scroll a lot to get to
+            earlier or later years, we implemented a feature where you could
+            zoom out and view all the histograms in one view. This lets users
+            get a "bird eye view" of all the years, and then also have the
+            option to zoom into the specified year on the timeline they want to
+            view which solves the issue of a scrollable element being too dense
+            in data.
+          </p>
+
+          <p>
+            For the map itself, we added a brushing feature where you can select
+            an area on the map. This lets you then get specific information of
+            that selected region such as number of detections, percent AOD
+            coverage, etc. We decided to include this feature because if someone
+            wanted to get information within an area, this would be an easy way
+            to do it.
+          </p>
+
+          <p>
+            We also decided to include a filter for the type of thermal
+            anomalies. Each one is classified as a vegetation fire, active
+            volcano, other static land source, offshore, or unknown type. We
+            decided on this because the reader might be interested in viewing
+            the most common types of thermal anomalies and the associated
+            aerosol optical depth. We noticed for our time range there was only
+            one active volcano thermal anomaly. We did more research and it
+            turns out that thermal anomaly was not even an active volcano caused
+            anomaly but rather the satellite misclassified it. We decided to
+          </p>
+
+          <p>
+            We included tooltips next to certain parts of our visualization such
+            as one for the minimum confidence slider. To a first time viewer or
+            reader, they might not know what those terms mean so having that
+            tooltip clarifies confusion. We also included one next to the
+            aerosol optical depth color scale.
+          </p>
+
+          <p>
+            For the development process, we all worked on the same codebase /
+            visualization. As we progressed through adding different design
+            elements or features, we all shared different suggestions for how we
+            could improve the visualization. When we faced an issue, such as how
+            to properly scale thermal anomaly FRP, we spent some time thinking
+            and doing individual research before sharing our ideas. We also kept
+            a notepad of different ideas we brainstormed that would improve the
+            visualization and we then went through them one by one. I would
+            estimate we spent about 3-4 hours working together on the
+            visualization. We also spent some time individually brainstorming
+            before our meetings. I would say the actual implementation of the
+            code for the visualization took the most time. This is because we
+            already had ideas written down prior to implementing the code, but
+            while working on the visualization we encountered issue we had to
+            resolve such as technical or we just wanted to revise some ideas we
+            thought weren't great.
+          </p>
+          <h3>Sources</h3>
+          <p id="data-updated" class="note"></p>
+          <p class="note">
+            Thermal detections come from
+            <a href="https://firms.modaps.eosdis.nasa.gov/country/"
+              >NASA FIRMS annual MODIS records</a
+            >
+            and recent
+            <a href="https://gibs.earthdata.nasa.gov/">NASA GIBS</a> Terra
+            records. These are downloaded locally and loaded by day. AOD imagery
+            is retrieved live from GIBS and decoded into approximate value
+            ranges. California state and county boundaries come from
+            <a href="https://github.com/topojson/us-atlas">us-atlas</a>.
+          </p>
+          <p class="note">
+            AOD coverage begins February 24, 2000; thermal detections begin
+            November 1, 2000. Dates without thermal observations are
+            unavailable, not zero. The selectable range ends at the earlier of
+            yesterday (UTC) and the downloaded snapshot.
+          </p>
         </section>
       </div>
-      <details class="methods">
-        <summary>Data and methods</summary>
-        <p id="data-updated" class="note"></p>
-        <p class="note">AOD coverage begins February 24, 2000; thermal detections begin November 1, 2000. Dates without thermal observations are unavailable, not zero. The selectable range ends at the earlier of yesterday (UTC) and the downloaded snapshot. AOD is approximate; gray map areas have no usable observation.
-          Detections use equal-size orange markers. Opacity is proportional to FRP,
-          capped at full opacity at 100 MW; unknown power uses 50% opacity.
-          Marker size stays constant on screen while zooming. Legend ranges show representative opacity;
-          the mapping is continuous. Hotspot types are inferred, not confirmed causes.
-          “Vegetation fire” means presumed vegetation fire. Points are detections, not distinct fires.
-          <a href="https://firms.modaps.eosdis.nasa.gov/country/">NASA FIRMS annual MODIS records</a>
-          and recent GIBS Terra records are downloaded locally and loaded by day.
-          AOD imagery is loaded live from GIBS. County borders and the base map are grayscale.
-          Histogram counts are statewide and follow type and confidence filters, independently of the map selection.</p>
-      </details>
     </main>
   </body>
 </html>
