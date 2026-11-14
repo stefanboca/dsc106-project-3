@@ -1,9 +1,11 @@
 import * as d3 from 'https://cdn.jsdelivr.net/npm/d3@7/+esm';
-import { loadMODIS, loadCalifornia, loadCounties, getCachedDay, prefetchDays, stopPrefetch, CALIFORNIA_BOUNDS } from './global.js';
+import { loadMODIS, loadCalifornia, loadCounties, loadManifest, getCachedDay, prefetchDays, stopPrefetch, CALIFORNIA_BOUNDS } from './global.js';
 
 const svg = d3.select('#map');
 const scene = svg.append('g');
 const projection = d3.geoEquirectangular();
+let mapSize = { width: 800, height: 650 };
+let mapCalifornia, mapCounties;
 const path = d3.geoPath(projection);
 const color = d3.scaleThreshold().domain([0.2, 0.5, 1, 2]).range(d3.quantize(d3.interpolateViridis, 5));
 const DETECTION_COLOR = '#f97316';
@@ -35,14 +37,16 @@ let region = null; // [[west, south], [east, north]], retained across dates and 
 let syncingBrush = false;
 let selectedIndex = 252;
 const calendar = document.querySelector('#calendar-date');
-const infoButton = document.querySelector('#confidence-info');
-const infoPopover = document.querySelector('#confidence-help');
+const infoPopovers = [...document.querySelectorAll('button[popovertarget]')].map(button => ({ button, popover: document.getElementById(button.getAttribute('popovertarget')) }));
 function positionInfo() {
-  const bounds = infoButton.getBoundingClientRect();
-  infoPopover.style.left = Math.max(12, Math.min(bounds.right - infoPopover.offsetWidth, window.innerWidth - infoPopover.offsetWidth - 12)) + 'px';
-  infoPopover.style.top = Math.max(12, Math.min(bounds.bottom + 8, window.innerHeight - infoPopover.offsetHeight - 12)) + 'px';
+  for (const { button, popover } of infoPopovers) {
+    if (!popover.matches(':popover-open')) continue;
+    const bounds = button.getBoundingClientRect();
+    popover.style.left = Math.max(12, Math.min(bounds.right - popover.offsetWidth, window.innerWidth - popover.offsetWidth - 12)) + 'px';
+    popover.style.top = Math.max(12, Math.min(bounds.bottom + 8, window.innerHeight - popover.offsetHeight - 12)) + 'px';
+  }
 }
-infoPopover.addEventListener('toggle', event => { if (event.newState === 'open') positionInfo(); });
+for (const { popover } of infoPopovers) popover.addEventListener('toggle', event => { if (event.newState === 'open') positionInfo(); });
 window.addEventListener('resize', positionInfo);
 window.addEventListener('scroll', positionInfo, true);
 calendar.addEventListener('change', () => {
@@ -58,11 +62,15 @@ const retry = document.querySelector('#retry');
 let data;
 let selection = 0;
 let debounce;
-const firstDay = new Date('2020-01-01T00:00:00Z');
-const lastDay = d3.utcDay.floor(new Date());
+const snapshot = await loadManifest();
+const firstDay = new Date(snapshot.start + 'T00:00:00Z');
+const yesterday = d3.utcDay.offset(d3.utcDay.floor(new Date()), -1);
+const lastDay = new Date(Math.min(+yesterday, Date.parse(snapshot.end + 'T00:00:00Z')));
 const DAY = 86400000;
 const daySpan = d3.utcDay.count(firstDay, lastDay);
+calendar.min = snapshot.start;
 calendar.max = d3.utcFormat('%Y-%m-%d')(lastDay);
+selectedIndex = Math.max(0, Math.min(daySpan, d3.utcDay.count(firstDay, new Date(calendar.value + 'T00:00:00Z'))));
 const selectedDate = () => d3.utcFormat('%Y-%m-%d')(d3.utcDay.offset(firstDay, selectedIndex));
 const viewport = document.querySelector('#timeline-viewport');
 const histogram = d3.select('#detection-histogram');
@@ -87,7 +95,6 @@ function revealDate() {
     clampView();
   }
 }
-document.querySelector('#today').addEventListener('click', () => selectDay(daySpan));
 let countSignature = '';
 let countVersion = 0;
 let filteredCounts = null;
@@ -165,12 +172,26 @@ function renderHistogram() {
     bars.selectAll('rect.missing-day').data(columns.filter(column => column.missing), column => column.start).join('rect').attr('class', 'missing-day')
       .attr('x', columnX).attr('y', 112).attr('width', columnWidth).attr('height', 5).attr('fill', '#cbd0d5');
     const span = visibleSpan();
-    const interval = span > 730 ? d3.utcMonth.every(3) : span > 120 ? d3.utcMonth : span > 35 ? d3.utcMonday : d3.utcDay.every(Math.max(1, Math.ceil(55 / pixelsPerDay)));
-    calendarAxis.attr('transform', 'translate(0,123)').call(d3.axisBottom(timeScale).ticks(interval).tickFormat(d3.utcFormat(span > 120 ? '%b' : '%b %d')).tickSize(5))
+    const yearsOnly = span > 365 * 3;
+    const interval = yearsOnly ? d3.utcYear.every(Math.max(1, Math.ceil(span / 365 / (plotWidth() / 64)))) :
+      span > 730 ? d3.utcMonth.every(3) : span > 120 ? d3.utcMonth : span > 35 ? d3.utcMonday : d3.utcDay.every(Math.max(1, Math.ceil(55 / pixelsPerDay)));
+    const tickFormat = d3.utcFormat(yearsOnly ? '%Y' : span > 120 ? '%b' : '%b %d');
+    calendarAxis.attr('transform', 'translate(0,123)').call(d3.axisBottom(timeScale).ticks(interval).tickFormat(tickFormat).tickSize(5))
       .call(g => g.select('.domain').attr('stroke', '#cbd5e1'));
     const [start, end] = timeScale.domain();
-    yearsAxis.selectAll('text').data(d3.utcYear.range(d3.utcYear.floor(start), d3.utcDay.offset(end, 1))).join('text')
-      .attr('x', day => Math.max(timelineMargin.left, timeScale(day))).attr('y', 169).text(d3.utcFormat('%Y'));
+    const labels = [];
+    if (!yearsOnly) {
+      const years = d3.utcYear.range(d3.utcYear.floor(new Date(Math.max(+start, +firstDay))), d3.utcDay.offset(end, 1));
+      for (const year of years) {
+        const left = Math.max(timelineMargin.left, timeScale(year));
+        const right = Math.min(timelineWidth - timelineMargin.right, timeScale(d3.utcYear.offset(year, 1)));
+        if (right - left < 20) continue; // Omit tiny slivers of adjacent years.
+        const x = (left + right) / 2;
+        if (!labels.length || x - labels[labels.length - 1].x >= 44) labels.push({ year, x });
+      }
+    }
+    yearsAxis.selectAll('text').data(labels, label => +label.year).join('text').attr('x', label => label.x)
+      .attr('y', 169).attr('text-anchor', 'middle').text(label => d3.utcFormat('%Y')(label.year));
     if (countDays) document.querySelector('#histogram-status').textContent = 'Daily California detections · statewide, filters applied' + (step > 1 ? ' · peak daily count per column' : '');
   }
   bars.selectAll('rect.day-bar').attr('fill', column => selectedIndex >= column.start && selectedIndex <= column.end ? DETECTION_COLOR : '#6e879e');
@@ -197,23 +218,94 @@ viewport.addEventListener('wheel', event => {
   else { viewStart += delta / pixelsPerDay; drawHistogram(); }
 }, { passive: false });
 let scrubPointer = null;
-function scrub(event) {
-  const [x] = d3.pointer(event, histogram.node());
+const timelineTouches = new Map();
+let touchSession = null;
+let touchGesture = null;
+let touchCommit = null;
+function scrubAtX(x) {
   const bounded = Math.max(timelineMargin.left, Math.min(timelineWidth - timelineMargin.right, x));
   selectDay(d3.utcDay.count(firstDay, d3.utcDay.round(timeScale.invert(bounded))), { reveal: false });
 }
+function captureTimelinePointer(event) {
+  try { histogram.node().setPointerCapture(event.pointerId); } catch { /* pointer already released */ }
+}
+function beginTouchGesture() {
+  clearTimeout(touchCommit); touchCommit = null;
+  touchSession.hadMultiple = true;
+  const [a, b] = [...timelineTouches.values()];
+  const centerX = (a.x + b.x) / 2;
+  touchGesture = {
+    distance: Math.max(1, Math.hypot(b.x - a.x, b.y - a.y)),
+    scale: pixelsPerDay,
+    anchorDay: viewStart + (centerX - timelineMargin.left) / pixelsPerDay,
+  };
+}
+function moveTouchGesture() {
+  const [a, b] = [...timelineTouches.values()];
+  const centerX = (a.x + b.x) / 2;
+  const distance = Math.max(1, Math.hypot(b.x - a.x, b.y - a.y));
+  pixelsPerDay = Math.max(plotWidth() / (daySpan + 1), Math.min(80, touchGesture.scale * distance / touchGesture.distance));
+  viewStart = touchGesture.anchorDay - (centerX - timelineMargin.left) / pixelsPerDay;
+  drawHistogram();
+}
+function finishTimelinePointer(event) {
+  if (timelineTouches.has(event.pointerId)) {
+    clearTimeout(touchCommit); touchCommit = null;
+    // A two-finger gesture never turns into a scrub as fingers lift one by one.
+    if (event.type === 'pointerup' && timelineTouches.size === 1 && !touchSession.hadMultiple && touchSession.eligible) {
+      scrubAtX(d3.pointer(event, histogram.node())[0]);
+    }
+    timelineTouches.delete(event.pointerId);
+    if (timelineTouches.size >= 2) beginTouchGesture();
+    else touchGesture = null;
+    if (!timelineTouches.size) touchSession = null;
+  }
+  if (event.pointerId === scrubPointer) scrubPointer = null;
+}
 histogram.on('pointerdown', event => {
-  if (event.button !== 0 || d3.pointer(event, histogram.node())[0] < timelineMargin.left) return;
+  if (event.button !== 0) return;
+  const [x, y] = d3.pointer(event, histogram.node());
+  if (event.pointerType === 'touch') {
+    event.preventDefault();
+    if (!timelineTouches.size) touchSession = { start: { x, y }, active: false, hadMultiple: false, eligible: x >= timelineMargin.left && x <= timelineWidth - timelineMargin.right };
+    timelineTouches.set(event.pointerId, { x, y });
+    captureTimelinePointer(event);
+    viewport.focus({ preventScroll: true });
+    if (timelineTouches.size >= 2) beginTouchGesture();
+    return;
+  }
+  if (x < timelineMargin.left) return;
   event.preventDefault();
   scrubPointer = event.pointerId;
   viewport.focus({ preventScroll: true });
-  histogram.node().setPointerCapture(event.pointerId);
-  scrub(event);
+  captureTimelinePointer(event);
+  scrubAtX(x);
 }).on('pointermove', event => {
-  if (event.pointerId === scrubPointer) scrub(event);
-}).on('pointerup pointercancel lostpointercapture', event => {
-  if (event.pointerId === scrubPointer) scrubPointer = null;
+  const [x, y] = d3.pointer(event, histogram.node());
+  if (timelineTouches.has(event.pointerId)) {
+    event.preventDefault();
+    timelineTouches.set(event.pointerId, { x, y });
+    if (timelineTouches.size >= 2 && touchGesture) moveTouchGesture();
+    else if (!touchSession.hadMultiple && touchSession.eligible) {
+      if (touchSession.active) scrubAtX(x);
+      else if (!touchCommit && Math.hypot(x - touchSession.start.x, y - touchSession.start.y) >= 4) {
+        // Give the second finger a short arrival window before committing a scrub.
+        touchCommit = setTimeout(() => {
+          touchCommit = null;
+          if (timelineTouches.size === 1 && !touchSession?.hadMultiple) {
+            touchSession.active = true;
+            scrubAtX([...timelineTouches.values()][0].x);
+          }
+        }, 60);
+      }
+    }
+  } else if (event.pointerId === scrubPointer) scrubAtX(x);
+}).on('pointerup pointercancel lostpointercapture', finishTimelinePointer);
+window.addEventListener('blur', () => {
+  clearTimeout(touchCommit); touchCommit = null;
+  timelineTouches.clear(); touchSession = null; touchGesture = null; scrubPointer = null;
 });
+
 viewport.setAttribute('aria-valuemin', 0);
 viewport.setAttribute('aria-valuemax', daySpan);
 function stepDateWithArrow(event) {
@@ -274,7 +366,7 @@ scene.append('path').attr('class', 'boundary').attr('fill', 'none').attr('stroke
 const countiesLayer = scene.append('g').attr('class', 'counties').attr('fill', 'none').attr('stroke', '#575757').attr('stroke-opacity', 0.55).attr('pointer-events', 'none');
 const fires = scene.append('g');
 const brushLayer = svg.append('g').attr('class', 'brush');
-const brush = d3.brush().extent([[0, 0], [800, 650]]).on('brush end', event => {
+const brush = d3.brush().extent(() => [[0, 0], [mapSize.width, mapSize.height]]).on('brush end', event => {
   if (syncingBrush) return;
   const transform = d3.zoomTransform(svg.node());
   if (event.selection) {
@@ -312,29 +404,66 @@ document.querySelector('#clear-selection').addEventListener('click', () => {
 });
 document.querySelector('#reset').addEventListener('click', () => svg.call(zoom.transform, d3.zoomIdentity));
 
+function applyBrushMode() {
+  brushLayer.attr('pointer-events', selecting ? 'all' : 'none').attr('display', selecting || region ? null : 'none');
+  brushLayer.selectAll('*').style('pointer-events', selecting ? null : 'none');
+}
+function layoutMap() {
+  const width = svg.node().clientWidth, height = svg.node().clientHeight;
+  if (!width || !height) return;
+  const oldTransform = d3.zoomTransform(svg.node());
+  const oldCenter = mapCalifornia ? projection.invert(oldTransform.invert([mapSize.width / 2, mapSize.height / 2])) : null;
+  mapSize = { width, height };
+  // SVG coordinates now match the entire visible canvas, including what used
+  // to be letterboxed space outside the fixed 800×650 viewBox.
+  svg.attr('viewBox', `0 0 ${width} ${height}`);
+  brushLayer.call(brush);
+  if (mapCalifornia) {
+    projection.fitExtent([[20, 20], [width - 20, height - 20]], mapCalifornia);
+    scene.selectAll('.land, .boundary').datum(mapCalifornia).attr('d', path);
+    clip.datum(mapCalifornia).attr('d', path);
+    countiesLayer.selectAll('path').data(mapCounties.features).join('path').attr('d', path)
+      .attr('stroke-width', 0.6).attr('vector-effect', 'non-scaling-stroke');
+    rasterGeometry.clear(); lastRaster = undefined;
+    if (oldCenter && (oldTransform.k !== 1 || oldTransform.x !== 0 || oldTransform.y !== 0)) {
+      const center = projection(oldCenter);
+      svg.call(zoom.transform, d3.zoomIdentity.translate(width / 2 - oldTransform.k * center[0], height / 2 - oldTransform.k * center[1]).scale(oldTransform.k));
+    } else svg.call(zoom.transform, d3.zoomIdentity);
+    if (data) render();
+  }
+  syncBrush();
+  applyBrushMode();
+}
+new ResizeObserver(layoutMap).observe(svg.node());
+
 function inRegion(d) {
   return !region || (d.longitude >= region[0][0] && d.longitude <= region[1][0] && d.latitude >= region[0][1] && d.latitude <= region[1][1]);
 }
 function filteredFires() {
   return (data?.days[0].fires ?? []).filter(d => enabledTypes.has(detectionType(d).id) && (Number(confidence.value) === 0 || (d.confidence !== null && d.confidence >= Number(confidence.value))));
 }
-function updateSelection() {
-  fires.selectAll('circle').attr('opacity', d => powerOpacity(d) * (inRegion(d) ? 1 : 0.15));
-  aerosols.selectAll('rect').attr('opacity', d => inRegion(d) ? 1 : 0.2);
-  document.querySelector('#clear-selection').disabled = !region;
-  const summary = document.querySelector('#selection-status');
+function updateMapStatus() {
+  if (!data) { status.textContent = region ? 'Selected region · Loading selected date…' : 'Loading selected date…'; return; }
+  const day = data.days[0];
+  const errors = Object.entries(day.errors).map(([layer, message]) => `${layer}: ${message}`);
+  const suffix = (errors.length ? ' · ' + errors.join('; ') : '') +
+    (day.date !== selectedDate() ? ` · Loading selected date; map still shows ${day.date}` : '');
   if (!region) {
-    summary.textContent = 'Scroll to zoom · Drag to pan · Select region to draw a rectangle.';
+    status.textContent = `${day.fires === null ? 'Detections unavailable' : `${filteredFires().length.toLocaleString()} of ${day.fires.length.toLocaleString()} detections passing type and confidence filters`} · ${day.aod ? `${(day.aod.coverage * 100).toFixed(1)}% AOD coverage` : 'AOD unavailable'}${suffix}`;
     return;
   }
-  if (!data) { summary.textContent = 'Region selected; waiting for the selected date’s data.'; return; }
-  const day = data.days[0];
   const cells = day.aod?.cells.filter(inRegion) ?? [];
-  const observed = cells.filter(d => d.value !== null);
-  const totalWeight = d3.sum(cells, d => d.weight), observedWeight = d3.sum(observed, d => d.weight);
+  const observed = cells.filter(cell => cell.value !== null);
+  const totalWeight = d3.sum(cells, cell => cell.weight), observedWeight = d3.sum(observed, cell => cell.weight);
   const coverage = totalWeight ? observedWeight / totalWeight : 0;
-  const mean = coverage >= 0.05 ? d3.sum(observed, d => d.value * d.weight) / observedWeight : null;
-  summary.textContent = `Selected region · ${day.fires === null ? 'Detections unavailable' : `${filteredFires().filter(inRegion).length.toLocaleString()} detections passing type and confidence filters`} · ${day.aod ? `${(coverage * 100).toFixed(1)}% AOD coverage` : 'AOD unavailable'} · Mean AOD: ${mean === null ? 'unavailable' : `≈ ${mean.toFixed(2)}`} (area weighted; needs ≥5% coverage)`;
+  const mean = coverage >= 0.05 ? d3.sum(observed, cell => cell.value * cell.weight) / observedWeight : null;
+  status.textContent = `Selected region · ${day.fires === null ? 'Detections unavailable' : `${filteredFires().filter(inRegion).length.toLocaleString()} detections passing type and confidence filters`} · ${day.aod ? `${(coverage * 100).toFixed(1)}% AOD coverage` : 'AOD unavailable'} · Mean AOD: ${mean === null ? 'unavailable' : `≈ ${mean.toFixed(2)}`} (area weighted; needs ≥5% coverage)${suffix}`;
+}
+function updateSelection() {
+  fires.selectAll('circle').attr('opacity', point => powerOpacity(point) * (inRegion(point) ? 1 : 0.15));
+  aerosols.selectAll('rect').attr('opacity', cell => inRegion(cell) ? 1 : 0.2);
+  document.querySelector('#clear-selection').disabled = !region;
+  updateMapStatus();
 }
 confidence.addEventListener('input', () => {
   document.querySelector('#confidence-value').value = `${confidence.value}%`;
@@ -415,8 +544,6 @@ function render() {
     .attr('r', radius / d3.zoomTransform(svg.node()).k).attr('fill', DETECTION_COLOR)
     .attr('stroke', DETECTION_COLOR).attr('stroke-width', 0.35).attr('vector-effect', 'non-scaling-stroke').attr('tabindex', 0)
     .selectAll('title').data(d => [d]).join('title').text(d => `${d.date} ${d.acquisitionTime ?? ''} UTC\nType: ${detectionType(d).label} (inferred)\nConfidence: ${d.confidence ?? 'unavailable'}%\nFRP: ${d.frp ?? 'unavailable'} MW\n${d.latitude}°N, ${d.longitude}°E`);
-  const errors = Object.entries(day.errors).map(([layer, message]) => `${layer}: ${message}`);
-  status.textContent = `${day.fires === null ? 'Detections unavailable' : `${filteredFires().length.toLocaleString()} of ${day.fires.length.toLocaleString()} detections passing type and confidence filters`} · ${day.aod ? `${(day.aod.coverage * 100).toFixed(1)}% AOD coverage` : 'AOD unavailable'}${errors.length ? ` · ${errors.join('; ')}` : ''}${day.date !== selectedDate() ? ` · Loading selected date; map still shows ${day.date}` : ''}`;
   retry.hidden = !data.days.some(day => Object.keys(day.errors).length);
   visibility();
   updateSelection();
@@ -439,7 +566,7 @@ function selectDay(index, { reveal = true } = {}) {
     return;
   }
   // Keep the displayed map intact while the requested date loads.
-  status.textContent = `Loading selected date…${data ? ' Map still shows ' + data.days[0].date : ''}`;
+  updateMapStatus();
   svg.attr('aria-busy', 'true'); retry.hidden = true;
   debounce = setTimeout(load, 100);
 }
@@ -448,18 +575,16 @@ async function load() {
   const version = ++selection;
   const requestedDate = selectedDate();
   retry.hidden = true;
-  status.textContent = `Loading selected date…${data ? ' Map still shows ' + data.days[0].date : ''}`;
+  updateMapStatus();
   svg.attr('aria-busy', 'true');
   try {
     // Display the outline before imagery arrives; request only this day's layers.
     if (!baseReady) {
     const [california, counties] = await Promise.all([loadCalifornia(), loadCounties()]);
     if (version !== selection) return;
-    projection.fitExtent([[30, 20], [770, 630]], california);
-    scene.selectAll('.land, .boundary').datum(california).attr('d', path);
-    clip.datum(california).attr('d', path);
-    countiesLayer.selectAll('path').data(counties.features).join('path').attr('d', path).attr('stroke-width', 0.6).attr('vector-effect', 'non-scaling-stroke');
+    mapCalifornia = california; mapCounties = counties;
     baseReady = true;
+    layoutMap();
     }
     const next = await loadMODIS({ start: requestedDate, end: requestedDate });
     if (version !== selection) return;

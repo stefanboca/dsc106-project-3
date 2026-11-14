@@ -1,6 +1,6 @@
 * { box-sizing: border-box; }
 body { margin: 0; color: #27323d; background: #fff; font: 14px/1.4 system-ui, sans-serif; }
-.container { max-width: 1600px; padding: 16px 20px; margin: auto; }
+.container { max-width: none; padding: 16px 20px; margin: auto; }
 h1 { font-size: 20px; font-weight: 600; margin: 0 0 18px; }
 button, input { font: inherit; }
 button { padding: 7px 10px; border: 1px solid #aab4bd; border-radius: 4px; color: #27323d; background: #fff; cursor: pointer; }
@@ -27,7 +27,6 @@ input[type='range'] { accent-color: #166a9f; }
 .timeline { width: 100%; min-width: 0; }
 .timeline-header { display: flex; align-items: center; gap: 10px; }
 .timeline-header input { width: auto; padding: 4px 7px; border: 1px solid #aab4bd; border-radius: 4px; }
-#today { padding: 5px 9px; }
 .histogram-caption { font-size: 12px; color: #526171; margin: 8px 0 2px; }
 #timeline-viewport { width: 100%; overflow: hidden; border: 1px solid #e0e4e7; border-radius: 4px; }
 #detection-histogram { display: block; width: 100%; height: 180px; cursor: ew-resize; touch-action: none; user-select: none; }
@@ -36,7 +35,7 @@ input[type='range'] { accent-color: #166a9f; }
 .timeline-hint { font-size: 11px; color: #63707a; margin: 3px 0 8px; }
 #status { font-size: 12px; margin: 6px 0; min-height: 17px; }
 .map-row { display: grid; grid-template-columns: minmax(0, 1fr) 160px; align-items: start; gap: 14px; }
-#map { display: block; width: 100%; height: min(62vh, 680px); background: #f7f7f7; border: 1px solid #ddd; touch-action: none; cursor: grab; }
+#map { display: block; width: 100%; height: max(500px, calc(100dvh - 400px)); background: #f7f7f7; border: 1px solid #ddd; touch-action: none; cursor: grab; }
 #map:active { cursor: grabbing; }
 #map.selecting { cursor: crosshair; }
 #map circle:focus { outline: none; stroke: black; stroke-width: 2; }
@@ -72,4 +71,13 @@ input[type='range'] { accent-color: #166a9f; }
   .map-row { grid-template-columns: minmax(0, 1fr) 110px; }
   #legend svg { width: 110px; }
   #map { height: 430px; }
+}
+
+.layer-control { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+.layer-control label { display: flex; align-items: center; gap: 7px; }
+.layer-control .info-button { width: 22px; height: 22px; }
+.touch-timeline-hint { display: none; }
+@media (pointer: coarse), (max-width: 600px) {
+  .desktop-timeline-hint { display: none; }
+  .touch-timeline-hint { display: inline; }
 }

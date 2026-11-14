@@ -23,6 +23,7 @@ import json
 import time
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -34,7 +35,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "docs" / "data"
 FIRMS = "https://firms.modaps.eosdis.nasa.gov"
 GIBS = "https://gibs.earthdata.nasa.gov"
-START = dt.date(2020, 1, 1)
+START = dt.date(2000, 2, 24)
 
 
 def download(url: str, destination: Path) -> bytes:
@@ -126,18 +127,34 @@ def numeric(value):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--end", type=dt.date.fromisoformat, default=dt.datetime.now(dt.timezone.utc).date())
+    yesterday = dt.datetime.now(dt.timezone.utc).date() - dt.timedelta(days=1)
+    parser.add_argument("--end", type=dt.date.fromisoformat, default=yesterday)
     parser.add_argument("--cache-dir", type=Path, default=ROOT / ".cache" / "modis-downloads")
     parser.add_argument("--workers", type=int, default=6)
     parser.add_argument("--boundaries-only", action="store_true", help="Refresh boundaries and AOD pixel mask only")
     args = parser.parse_args()
-    if args.end < START or args.end > dt.datetime.now(dt.timezone.utc).date() or not 1 <= args.workers <= 12:
-        parser.error("Choose an end date between 2020-01-01 and today; workers must be 1–12")
+    if args.end < START or args.end > yesterday or not 1 <= args.workers <= 12:
+        parser.error(f"Choose an end date between {START} and yesterday (UTC); workers must be 1–12")
     cache = args.cache_dir
     california, boundary_sources = boundaries(cache)
     if args.boundaries_only:
         print("Saved state/county boundaries and AOD pixel mask", flush=True)
         return
+    # Coverage of the exact Terra layer. Missing mission days must not be
+    # interpreted as successful days with zero thermal detections.
+    capabilities_url = GIBS + "/wmts/epsg4326/best/1.0.0/WMTSCapabilities.xml"
+    root = ET.fromstring(download(capabilities_url, cache / f"capabilities-{dt.datetime.now(dt.timezone.utc).date()}.xml"))
+    thermal_coverage = []
+    for layer in root.findall(".//{*}Layer"):
+        identifier = layer.find("{*}Identifier")
+        if identifier is not None and identifier.text == "MODIS_Terra_Thermal_Anomalies_All":
+            for value in layer.findall("{*}Dimension/{*}Value"):
+                parts = value.text.split("/")
+                thermal_coverage.append([parts[0][:10], parts[1][:10] if len(parts) > 1 else parts[0][:10]])
+    if not thermal_coverage:
+        raise ValueError("Could not verify Terra thermal coverage")
+    def has_thermal(date):
+        return any(start <= str(date) <= end for start, end in thermal_coverage)
     dates = [START + dt.timedelta(days=i) for i in range((args.end - START).days + 1)]
     counts = {}
     sources = {}
@@ -150,16 +167,16 @@ def main():
         groups = Counter((row[8] if row[8] in (0, 1, 2, 3) else -1,
                           row[4] if row[4] is not None else -1)
                          for row in records if row[2] == "Terra")
-        counts[date] = [[kind, confidence, count] for (kind, confidence), count in sorted(groups.items())]
+        counts[date] = [[kind, confidence, count] for (kind, confidence), count in sorted(groups.items())] if has_thermal(date) else None
         sources[date] = source
 
     catalog = download(FIRMS + "/data/country/yearly_summary_files.txt", cache / f"catalog-{dt.date.today()}.txt").decode()
     live_dates = []
-    for year in range(2020, args.end.year + 1):
+    for year in range(START.year, args.end.year + 1):
         year_dates = [date for date in dates if date.year == year]
         filename = f"modis_{year}_United_States.csv"
         if not any(line.startswith(filename + ",") for line in catalog.splitlines()):
-            live_dates.extend(year_dates)
+            live_dates.extend(date for date in year_dates if has_thermal(date))
             continue
         source = f"{FIRMS}/data/country/modis/{year}/{filename}"
         payload = download(source, cache / filename).decode("utf-8-sig")
@@ -180,15 +197,16 @@ def main():
             if latest and day <= latest:
                 finish(day, records, source)
             else:
-                live_dates.append(dt.date.fromisoformat(day))
+                if has_thermal(day):
+                    live_dates.append(dt.date.fromisoformat(day))
         print(f"{year}: prepared archive records", flush=True)
 
     def live_day(date):
         day = str(date)
         source = f"{GIBS}/wmts/epsg4326/best/MODIS_Terra_Thermal_Anomalies_All/default/{day}/1km/3/1/1.mvt"
-        # Today's partial tile must be refreshed on each downloader run.
+        # Recent daily tiles can be revised as late observations arrive.
         path = cache / "tiles" / f"{day}.mvt"
-        if date == dt.datetime.now(dt.timezone.utc).date():
+        if date >= yesterday - dt.timedelta(days=2):
             path.unlink(missing_ok=True)
         payload = download(source, path)
         if payload[:2] == b"\x1f\x8b":
@@ -229,8 +247,10 @@ def main():
     generated = dt.datetime.now(dt.timezone.utc).isoformat()
     save(DATA / "detection-counts.json", {"satellite": "Terra", "generatedAt": generated, "days": days})
     save(DATA / "thermal-manifest.json", {"start": str(START), "end": str(args.end), "generatedAt": generated,
+                                          "thermalCoverage": thermal_coverage,
                                           "sources": sources, "unavailable": failures, "boundarySources": boundary_sources})
-    print(f"Saved {len(counts)}/{len(dates)} days; {len(failures)} unavailable. AOD remains live GIBS.", flush=True)
+    available_counts = sum(value is not None for value in counts.values())
+    print(f"Processed {len(dates)} days; thermal counts available for {available_counts}; {len(failures)} download failures. AOD remains live GIBS.", flush=True)
 
 if __name__ == "__main__":
     main()

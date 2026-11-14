@@ -13,8 +13,10 @@
       <div class="workspace">
         <aside class="sidebar" aria-label="Map filters">
           <div class="controls">
-            <label><input id="aod-layer" type="checkbox" checked /> Aerosol optical depth</label>
-            <label><input id="fire-layer" type="checkbox" checked /> Thermal detections</label>
+            <div class="layer-control"><label><input id="aod-layer" type="checkbox" checked /> Aerosol optical depth</label><button class="info-button" type="button" popovertarget="aod-help" aria-label="About aerosol optical depth"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="7" r="1.2" fill="currentColor"/><path d="M12 11v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
+            <div id="aod-help" class="info-tooltip-content" popover>Aerosol optical depth (AOD) measures how much particles in the atmospheric column attenuate light. Higher values indicate more aerosol loading. It is not a ground-level air-quality measurement. Colors show approximate ranges decoded from MODIS imagery; gray areas have no usable observation.</div>
+            <div class="layer-control"><label><input id="fire-layer" type="checkbox" checked /> Thermal detections</label><button class="info-button" type="button" popovertarget="thermal-help" aria-label="About thermal detections"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="7" r="1.2" fill="currentColor"/><path d="M12 11v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
+            <div id="thermal-help" class="info-tooltip-content" popover>MODIS detects satellite pixels with thermal anomalies, not separate fires. Orange dots have a constant screen size. Opacity increases with fire radiative power (FRP, in megawatts), reaching full opacity at 100 MW. Source types are inferred; recent records may have an unknown type.</div>
             <div class="confidence-control">
               <div class="confidence-heading">
                 <label for="confidence">Minimum confidence</label>
@@ -37,15 +39,14 @@
           <div class="timeline">
             <div class="timeline-header">
               <label for="calendar-date">Date (UTC)</label>
-              <input id="calendar-date" type="date" min="2020-01-01" value="2020-09-09" required />
-              <button id="today" type="button">Today</button>
+              <input id="calendar-date" type="date" min="2000-02-24" value="2020-09-09" required />
             </div>
             <p id="histogram-status" class="histogram-caption">Daily California detections · counts load after the map</p>
             <button id="retry-counts" type="button" hidden>Retry daily counts</button>
-            <div id="timeline-viewport" tabindex="0" role="slider" aria-label="Map date. Drag to scrub, horizontal scroll to pan, Control plus scroll to zoom.">
+            <div id="timeline-viewport" tabindex="0" role="slider" aria-label="Map date. One finger or mouse drag to scrub. Two fingers to pan and pinch to zoom. Horizontal scroll to pan; Control plus scroll to zoom.">
               <svg id="detection-histogram" aria-hidden="true"></svg>
             </div>
-            <p class="timeline-hint">Drag: scrub · Horizontal scroll: pan · Ctrl/⌘ + scroll: zoom · Arrow keys: step date</p>
+            <p class="timeline-hint"><span class="desktop-timeline-hint">Drag: scrub · Horizontal scroll: pan · Ctrl/⌘ + scroll: zoom · Arrow keys: step date</span><span class="touch-timeline-hint">One finger: scrub · Two-finger drag: pan · Pinch: zoom</span></p>
           </div>
           <p id="status" role="status" aria-live="polite">Loading MODIS data…</p>
           <div class="map-row">
@@ -66,7 +67,7 @@
       <details class="methods">
         <summary>Data and methods</summary>
         <p id="data-updated" class="note"></p>
-        <p class="note">AOD is approximate; gray map areas have no usable observation.
+        <p class="note">AOD coverage begins February 24, 2000; thermal detections begin November 1, 2000. Dates without thermal observations are unavailable, not zero. The selectable range ends at the earlier of yesterday (UTC) and the downloaded snapshot. AOD is approximate; gray map areas have no usable observation.
           Detections use equal-size orange markers. Opacity is proportional to FRP,
           capped at full opacity at 100 MW; unknown power uses 50% opacity.
           Marker size stays constant on screen while zooming. Legend ranges show representative opacity;

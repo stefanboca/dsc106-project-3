@@ -4,7 +4,7 @@ Refresh from the repository root:
 uv run scripts/download_data.py
 
 The Python script lives outside docs and uses uv's inline dependency metadata.
-It downloads NASA FIRMS annual USA MODIS CSVs for available years from 2020,
+It downloads NASA FIRMS annual USA MODIS CSVs for available years from 2000,
 then retrieves more recent Terra records from NASA GIBS vector tiles. It also
 saves California state and county boundaries from us-atlas (58 counties).
 Raw downloads are cached under .cache/modis-downloads (ignored by version control).
@@ -24,13 +24,17 @@ thermal-manifest.json records the download time, exact source URL for each date,
 and any unavailable dates. detection-counts.json contains Terra counts grouped
 by type and confidence, derived from the same clipped daily records. Null groups
 mean unavailable; empty groups mean a successfully downloaded day with zero
-California detections. Newly generated current-day records can be partial.
+California detections. Known Terra mission gaps and dates before the thermal record
+begins are also represented by null groups, never zero. The thermalCoverage
+intervals in the manifest come from the exact GIBS layer capabilities.
 
 The website fetches daily points, counts, and boundaries only from these static
 files. It does not fall back to an external detection API. AOD imagery and its
 palette are a separate live GIBS source, decoded approximately as before.
-Rerun the downloader to refresh the saved data. The calendar extends to today;
-dates newer than the downloaded snapshot are labeled unavailable.
+Rerun the downloader to refresh the saved data. It defaults to yesterday (UTC)
+and rejects later --end dates. The calendar is capped at the earlier of yesterday
+and the downloaded snapshot end date; it cannot advance beyond saved coverage.
+AOD coverage begins 2000-02-24; thermal detections begin 2000-11-01.
 
 Sources:
 https://firms.modaps.eosdis.nasa.gov/country/

@@ -75,6 +75,9 @@ export function loadManifest() {
 // Detections are downloaded by scripts/download_data.py. No browser API fallback.
 async function loadFires(date, satellite, signal) {
   const manifest = await loadManifest();
+  if (satellite === 'Terra' && manifest.thermalCoverage && !manifest.thermalCoverage.some(([start, end]) => date >= start && date <= end)) {
+    return { records: null, source: null };
+  }
   const source = manifest.sources[date];
   if (!source) throw new Error('Downloaded detections unavailable for this date; rerun scripts/download_data.py to refresh.');
   if (satellite !== 'Terra' && source.includes('gibs.earthdata')) throw new Error('Recent downloaded detections are Terra only.');
